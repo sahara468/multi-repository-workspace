@@ -1,9 +1,9 @@
 ## 1. 项目初始化
 
-- [ ] 1.1 初始化 TypeScript/Node.js 项目结构（package.json、tsconfig.json、src/ 目录）
-- [ ] 1.2 添加核心依赖（commander/yargs CLI 框架、simple-git、yaml 解析库、chalk/ora 终端 UI）
-- [ ] 1.3 配置构建工具（esbuild 或 tsx）和 bin 入口（`mrw` 命令）
-- [ ] 1.4 搭建命令注册框架（commander 子命令结构）
+- [x] 1.1 初始化 TypeScript/Node.js 项目结构（package.json、tsconfig.json、src/ 目录）
+- [x] 1.2 添加核心依赖（commander/yargs CLI 框架、simple-git、yaml 解析库、chalk/ora 终端 UI）
+- [x] 1.3 配置构建工具（esbuild 或 tsx）和 bin 入口（`mrw` 命令）
+- [x] 1.4 搭建命令注册框架（commander 子命令结构）
 
 ## 2. workspace.yaml 定义与解析
 
