@@ -100,6 +100,39 @@ MRW 定位为纯 CLI 工具集（无后台进程），使用 TypeScript/Node.js 
 
 **理由**：JSON 缓存简单够用，无需数据库依赖。MVP 阶段依赖分析需求有限，JSON 足以满足。
 
+### D10: 服务注册从 YAML 文件批量导入，非交互式循环添加
+
+**选择**：`mrw init` 不再交互式循环逐个添加 service，而是从用户提供的 `services.yaml`（或通过 `--services-file` 指定路径）批量导入。初始化后，通过 `mrw service add/remove/update` 子命令管理服务注册的增删改。
+
+**替代方案**：init 时 inquirer 循环交互式添加（原方案）
+
+**理由**：
+- 企业场景下服务数量通常 5-20 个，循环交互效率极低，且无法复用已有服务清单
+- YAML 文件可团队共享、版本管理，符合"配置即代码"理念
+- 增删改场景需要独立命令支持，而非每次重新 init
+- `services.yaml` 格式与 `workspace.yaml` 中的 `services` 段保持一致，降低学习成本
+
+**services.yaml 格式**：
+```yaml
+services:
+  order-service:
+    repo: https://github.com/org/order-service.git
+    branch: main
+    language: java
+    description: 订单核心服务
+  inventory-service:
+    repo: https://github.com/org/inventory-service.git
+    branch: main
+    language: go
+    description: 库存管理服务
+```
+
+**服务管理命令**：
+- `mrw service add <name> --repo <url> --branch <name>` — 添加单个服务
+- `mrw service remove <name>` — 移除服务注册（不删除已 clone 的仓库，提示用户确认）
+- `mrw service update <name> [--repo <url>] [--branch <name>] [--language <lang>] [--description <desc>]` — 更新服务属性
+- `mrw service import [--file <path>]` — 从 YAML 文件批量导入/更新服务（默认 `services.yaml`）
+
 ## Risks / Trade-offs
 
 - **[企业采纳门槛]** → MVP 以开源项目形式发布，降低试用成本；workspace.yaml 定义简洁，初始化成本低

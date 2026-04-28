@@ -15,17 +15,46 @@ The system SHALL provide `mrw init` command to create a new Workspace with a `wo
 - **WHEN** user runs `mrw init --from-template <template-name>`
 - **THEN** the system SHALL create workspace.yaml pre-populated with template service definitions
 
-### Requirement: Service registration
-The system SHALL allow registering microservice repositories in workspace.yaml with the following fields: name, repo URL, default branch, language, description.
+### Requirement: Service registration via file import
+The system SHALL allow registering microservice repositories by importing from a YAML file (services.yaml), rather than interactive loop-based entry.
 
-#### Scenario: Add a service to workspace
-- **WHEN** user runs `mrw init` and provides service information during initialization
-- **THEN** the system SHALL add the service entry to the `services` section of workspace.yaml
+#### Scenario: Import services from file during init
+- **WHEN** user runs `mrw init` and a `services.yaml` file exists in the current directory
+- **THEN** the system SHALL read the services from the file and add them to the `services` section of workspace.yaml
+- **THEN** the system SHALL validate each service entry (mandatory fields: name, repo, branch)
+- **THEN** the system SHALL report the number of services imported and any validation errors
+
+#### Scenario: Import services from a specified file
+- **WHEN** user runs `mrw service import --file <path>`
+- **THEN** the system SHALL read services from the specified YAML file
+- **THEN** the system SHALL add new services to workspace.yaml
+- **THEN** for services already registered, the system SHALL update their fields with values from the file (merge behavior)
+- **THEN** the system SHALL report added, updated, and skipped services
 
 #### Scenario: Service definition validation
 - **WHEN** workspace.yaml contains a service entry
 - **THEN** the system SHALL require `name`, `repo`, and `branch` fields as mandatory
 - **THEN** `language` and `description` fields SHALL be optional
+
+### Requirement: Service CRUD management
+The system SHALL provide dedicated commands for adding, removing, and updating service registrations after workspace initialization.
+
+#### Scenario: Add a single service
+- **WHEN** user runs `mrw service add <name> --repo <url> --branch <name>`
+- **THEN** the system SHALL add the service entry to workspace.yaml
+- **THEN** the system SHALL validate mandatory fields (repo, branch)
+- **THEN** the system SHALL reject if a service with the same name already exists
+
+#### Scenario: Remove a service
+- **WHEN** user runs `mrw service remove <name>`
+- **THEN** the system SHALL remove the service entry from workspace.yaml
+- **THEN** the system SHALL NOT delete the cloned repository under `.mrw/state/repos/<name>/`
+- **THEN** the system SHALL display a warning that the cloned repo still exists locally
+
+#### Scenario: Update a service
+- **WHEN** user runs `mrw service update <name> [--repo <url>] [--branch <name>] [--language <lang>] [--description <desc>]`
+- **THEN** the system SHALL update only the specified fields for the service in workspace.yaml
+- **THEN** the system SHALL reject if the service name does not exist in workspace.yaml
 
 ### Requirement: Repository synchronization
 The system SHALL provide `mrw sync` command to clone and update all registered service repositories.
