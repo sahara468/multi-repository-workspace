@@ -4,7 +4,7 @@ import ora from 'ora';
 import fs from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
-import { loadWorkspace, type WorkspaceConfig } from '../lib/workspace.js';
+import { loadWorkspace } from '../lib/workspace.js';
 
 export const syncCommand = new Command('sync')
   .description('Clone or pull service repositories')
@@ -58,8 +58,9 @@ export const syncCommand = new Command('sync')
           spinner.succeed(chalk.green(`${name}: cloned (${service.branch})`));
           results.push({ name, status: 'cloned', branch: service.branch });
         }
-      } catch (err: any) {
-        spinner.fail(chalk.red(`${name}: ${err.message}`));
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        spinner.fail(chalk.red(`${name}: ${message}`));
         results.push({ name, status: 'failed' });
       }
     }

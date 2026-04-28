@@ -71,8 +71,15 @@ export const statusCommand = new Command('status')
           const git = simpleGit(serviceDir);
           const currentBranch = (await git.branch()).current;
           if (!branches.has(currentBranch)) branches.set(currentBranch, []);
-          branches.get(currentBranch)!.push(name);
-        } catch {}
+          const existing = branches.get(currentBranch);
+          if (existing) {
+            existing.push(name);
+          } else {
+            branches.set(currentBranch, [name]);
+          }
+        } catch {
+          // skip unreadable repos
+        }
       }
 
       if (branches.size > 1) {

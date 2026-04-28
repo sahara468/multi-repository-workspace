@@ -4,7 +4,7 @@ import ora from 'ora';
 import inquirer from 'inquirer';
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadWorkspace, saveWorkspace, type WorkspaceConfig } from '../lib/workspace.js';
+import { saveWorkspace, type WorkspaceConfig } from '../lib/workspace.js';
 
 export const initCommand = new Command('init')
   .description('Initialize a new MRW workspace in the current directory')
@@ -26,7 +26,7 @@ export const initCommand = new Command('init')
     await initInteractive(cwd);
   });
 
-async function initInteractive(cwd: string) {
+async function initInteractive(cwd: string): Promise<void> {
   const answers = await inquirer.prompt([
     {
       type: 'input',
@@ -150,7 +150,7 @@ async function initInteractive(cwd: string) {
   console.log(chalk.dim('  Run `mrw sync` to clone service repositories'));
 }
 
-async function initFromTemplate(cwd: string, templateName: string) {
+async function initFromTemplate(cwd: string, templateName: string): Promise<void> {
   console.log(chalk.yellow('--from-template is not yet implemented'));
   console.log(chalk.dim(`  Template "${templateName}" requested`));
 }

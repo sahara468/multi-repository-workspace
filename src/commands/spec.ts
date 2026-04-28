@@ -120,7 +120,7 @@ specCommand.addCommand(
         ? options.involves.split(',').map(s => s.trim())
         : [];
 
-      const frontmatter: Record<string, any> = { name };
+      const frontmatter: Record<string, string | string[]> = { name };
       if (involves.length > 0) {
         frontmatter.involves = involves;
       }

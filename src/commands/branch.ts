@@ -48,11 +48,12 @@ export const branchCommand = new Command('branch')
 
             await git.checkoutLocalBranch(branchName);
             console.log(chalk.green(`${name}: created branch "${branchName}"`));
-          } catch (err: any) {
-            if (err.message?.includes('already exists')) {
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (message.includes('already exists')) {
               console.log(chalk.yellow(`${name}: branch "${branchName}" already exists`));
             } else {
-              console.log(chalk.red(`${name}: ${err.message}`));
+              console.log(chalk.red(`${name}: ${message}`));
             }
           }
         }

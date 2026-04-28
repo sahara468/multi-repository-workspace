@@ -46,11 +46,12 @@ export const checkoutCommand = new Command('checkout')
 
         await git.checkout(branchName);
         console.log(chalk.green(`${name}: switched to "${branchName}"`));
-      } catch (err: any) {
-        if (err.message?.includes('did not match any file')) {
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes('did not match any file')) {
           console.log(chalk.red(`${name}: branch "${branchName}" not found`));
         } else {
-          console.log(chalk.red(`${name}: ${err.message}`));
+          console.log(chalk.red(`${name}: ${message}`));
         }
       }
     }
