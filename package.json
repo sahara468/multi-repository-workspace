@@ -6,6 +6,14 @@
   "bin": {
     "mrw": "./dist/cli.js"
   },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "build": "tsx build.ts",
     "dev": "tsx src/cli.ts",
@@ -13,7 +21,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "check": "eslint src/ && tsc --noEmit && vitest run --coverage"
+    "check": "eslint src/ && tsc --noEmit && vitest run --coverage",
+    "prepublishOnly": "npm run lint && npm test && npm run build",
+    "prepare": "npm run build"
   },
   "keywords": [
     "multi-repo",

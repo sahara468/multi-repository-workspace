@@ -2,18 +2,39 @@
 
 A CLI tool for managing multiple microservice repositories as a unified business workspace.
 
-## Install
+**License:** MIT | **Node.js:** >= 20.0.0
+
+## Installation
+
+### Global install (npm)
 
 ```bash
+npm install -g mrw
+```
+
+### Run without installing (npx)
+
+```bash
+npx mrw <command>
+```
+
+### Install from git
+
+```bash
+npm install -g github:sahara468/multi-repository-workspace
+```
+
+### Local development
+
+```bash
+git clone https://github.com/sahara468/multi-repository-workspace.git
+cd multi-repository-workspace
 npm install
 npm run build
+npm link
 ```
 
-Or run directly in development:
-
-```bash
-npm run dev -- <command>
-```
+After `npm link`, the `mrw` command is available globally.
 
 ## Quick Start
 

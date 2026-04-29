@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadWorkspace } from '../lib/workspace.js';
-import { readJsonCache, writeJsonCache, loadTopology, saveTopology, loadDependencies, saveDependencies } from '../lib/cache.js';
+import { loadTopology, loadDependencies } from '../lib/cache.js';
 
 export const indexCommand = new Command('index')
   .description('Manage workspace index caches')
