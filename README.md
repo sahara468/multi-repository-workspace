@@ -6,6 +6,17 @@ A CLI tool for managing multiple microservice repositories as a unified business
 
 ## Installation
 
+### Install from GitHub Release (recommended)
+
+Each release publishes a standalone `.tgz` package — no npm registry needed.
+
+```bash
+# Replace <version> with the latest release version (e.g., 0.1.0)
+npm install -g https://github.com/sahara468/multi-repository-workspace/releases/download/v<version>/mrw-<version>.tgz
+```
+
+Check the [Releases page](https://github.com/sahara468/multi-repository-workspace/releases) for available versions.
+
 ### Global install (npm)
 
 ```bash
@@ -35,6 +46,18 @@ npm link
 ```
 
 After `npm link`, the `mrw` command is available globally.
+
+## Usage
+
+After installation, the `mrw` command is available:
+
+```bash
+mrw --help           # Show all commands
+mrw init             # Initialize a workspace
+mrw sync             # Clone/pull all services
+mrw sync --depth 1   # Shallow clone (only latest commit)
+mrw reset --force    # Reset services to default branch and clean state
+```
 
 ## Quick Start
 
