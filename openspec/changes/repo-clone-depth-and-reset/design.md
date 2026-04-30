@@ -11,7 +11,6 @@ await simpleGit().clone(service.repo, serviceDir, ['--branch', service.branch]);
 
 **Goals:**
 - Allow shallow clones via `--depth` CLI flag on `mrw sync`
-- Allow per-service `cloneDepth` default in `workspace.yaml`
 - Add `mrw reset` command to revert services to default branch and clean state
 - Reset command supports `--force` to skip confirmation prompt and `--service <name>` to target a single service
 
@@ -22,21 +21,15 @@ await simpleGit().clone(service.repo, serviceDir, ['--branch', service.branch]);
 
 ## Decisions
 
-### 1. Clone depth precedence: CLI flag > service config > no depth
+### 1. Clone depth via CLI flag only
 
-**Decision:** `--depth` CLI flag overrides everything. If not set, fall back to `cloneDepth` in `ServiceConfig`. If neither is set, clone full history (current behavior).
+**Decision:** `--depth` CLI flag is the sole mechanism for shallow clone depth. No per-service config field.
 
-**Rationale:** CLI flag gives one-time override power. Per-service config handles cases where some repos need full history (e.g., for bisect) while others don't.
+**Rationale:** Simplicity — one way to set depth, no precedence rules. Users who need different depths for different services can run `mrw sync <service> --depth N` individually.
 
-**Alternative considered:** Global workspace-level `cloneDepth` — rejected because different services often need different depths.
+**Alternative considered:** Per-service `cloneDepth` in `workspace.yaml` — rejected as over-engineering; depth is a transient operational choice, not a persistent service property.
 
-### 2. `cloneDepth` field on `ServiceConfig` (optional, number)
-
-**Decision:** Add `cloneDepth?: number` to `ServiceConfig` interface. Validated as positive integer if present.
-
-**Rationale:** Keeps depth configuration co-located with the repo definition. Optional field maintains backward compatibility.
-
-### 3. `mrw reset` implementation: checkout + clean + reset
+### 2. `mrw reset` implementation: checkout + clean + reset
 
 **Decision:** `mrw reset` performs three git operations in sequence:
 1. `git checkout <default-branch>` — switch to the configured branch
@@ -47,13 +40,13 @@ await simpleGit().clone(service.repo, serviceDir, ['--branch', service.branch]);
 
 **Alternative considered:** Delete and re-clone — rejected because it's slower and may fail if network is unavailable.
 
-### 4. Reset confirmation prompt by default
+### 3. Reset confirmation prompt by default
 
 **Decision:** Reset prompts for confirmation unless `--force` is passed.
 
 **Rationale:** Reset is destructive (discards all local changes). A confirmation prompt prevents accidental data loss. `--force` enables scripting use.
 
-### 5. Reset operates on all services by default, `--service` for single
+### 4. Reset operates on all services by default, `--service` for single
 
 **Decision:** Same pattern as `mrw sync` and `mrw checkout`.
 

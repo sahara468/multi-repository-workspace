@@ -8,6 +8,7 @@ import { specCommand } from './commands/spec.js';
 import { changeCommand } from './commands/change.js';
 import { serviceCommand } from './commands/service.js';
 import { indexCommand } from './commands/index.js';
+import { resetCommand } from './commands/reset.js';
 
 const program = new Command();
 
@@ -25,5 +26,6 @@ program.addCommand(specCommand);
 program.addCommand(changeCommand);
 program.addCommand(serviceCommand);
 program.addCommand(indexCommand);
+program.addCommand(resetCommand);
 
 program.parse();

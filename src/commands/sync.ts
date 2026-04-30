@@ -9,7 +9,16 @@ import { loadWorkspace } from '../lib/workspace.js';
 export const syncCommand = new Command('sync')
   .description('Clone or pull service repositories')
   .argument('[service]', 'Sync a specific service only')
-  .action(async (serviceName?: string) => {
+  .option('--depth <n>', 'Shallow clone depth (positive integer)')
+  .action(async (serviceName?: string, options?: { depth?: string }) => {
+    let depth: number | undefined;
+    if (options?.depth !== undefined) {
+      depth = Number(options.depth);
+      if (!Number.isInteger(depth) || depth < 1) {
+        console.log(chalk.red('--depth must be a positive integer'));
+        return;
+      }
+    }
     const cwd = process.cwd();
     const config = loadWorkspace(cwd);
 
@@ -54,8 +63,13 @@ export const syncCommand = new Command('sync')
           spinner.succeed(chalk.green(`${name}: updated (${currentBranch})`));
           results.push({ name, status: 'updated', branch: currentBranch });
         } else {
-          await simpleGit().clone(service.repo, serviceDir, ['--branch', service.branch]);
-          spinner.succeed(chalk.green(`${name}: cloned (${service.branch})`));
+          const cloneArgs = ['--branch', service.branch];
+          if (depth) {
+            cloneArgs.push('--depth', String(depth));
+          }
+          await simpleGit().clone(service.repo, serviceDir, cloneArgs);
+          const depthLabel = depth ? `, depth ${depth}` : '';
+          spinner.succeed(chalk.green(`${name}: cloned (${service.branch}${depthLabel})`));
           results.push({ name, status: 'cloned', branch: service.branch });
         }
       } catch (err: unknown) {
