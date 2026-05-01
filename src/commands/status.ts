@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import fs from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
-import { loadWorkspace } from '../lib/workspace.js';
+import { loadWorkspace, getRepoIndex, getServiceRepoDir } from '../lib/workspace.js';
 
 export const statusCommand = new Command('status')
   .description('Show workspace status')
@@ -26,57 +26,85 @@ export const statusCommand = new Command('status')
     }
     console.log();
 
-    // Services
     const reposDir = path.join(cwd, '.mrw', 'state', 'repos');
-    const serviceNames = Object.keys(config.services);
-    const defaultBranches = new Set(Object.values(config.services).map(s => s.branch));
+    const index = getRepoIndex(config);
 
-    console.log(chalk.bold('Services:'));
-    for (const name of serviceNames) {
-      const service = config.services[name];
-      const serviceDir = path.join(reposDir, name);
+    // Repos
+    console.log(chalk.bold('Repositories:'));
+    for (const [repoName, entry] of index) {
+      const repoDir = path.join(reposDir, repoName);
+      const svcList = entry.services.join(', ');
 
-      if (!fs.existsSync(serviceDir)) {
-        console.log(`  ${chalk.yellow('○')} ${name} ${chalk.dim('— not cloned')}`);
+      if (!fs.existsSync(repoDir)) {
+        console.log(`  ${chalk.yellow('○')} ${repoName} ${chalk.dim(`[${svcList}] — not cloned`)}`);
         continue;
       }
 
       try {
-        const git = simpleGit(serviceDir);
+        const git = simpleGit(repoDir);
         const branchSummary = await git.branch();
         const status = await git.status();
         const currentBranch = branchSummary.current;
         const isClean = status.isClean();
 
-        // Highlight if on a different branch than default
-        const branchDisplay = currentBranch === service.branch
+        const branchDisplay = currentBranch === entry.branch
           ? currentBranch
           : chalk.yellow(currentBranch);
 
         const dirtyIndicator = isClean ? '' : chalk.red(' (uncommitted changes)');
 
-        console.log(`  ${chalk.green('●')} ${name} ${chalk.dim(`[${branchDisplay}]`)}${dirtyIndicator}`);
+        console.log(`  ${chalk.green('●')} ${repoName} ${chalk.dim(`[${svcList}]`)} ${chalk.dim(`[${branchDisplay}]`)}${dirtyIndicator}`);
+      } catch {
+        console.log(`  ${chalk.red('✗')} ${repoName} ${chalk.dim(`[${svcList}] — error reading repo`)}`);
+      }
+    }
+
+    // Services detail
+    console.log();
+    console.log(chalk.bold('Services:'));
+    const serviceNames = Object.keys(config.services);
+
+    for (const name of serviceNames) {
+      const service = config.services[name];
+      const repoDir = getServiceRepoDir(name, config, cwd);
+
+      if (!fs.existsSync(repoDir)) {
+        console.log(`  ${chalk.yellow('○')} ${name} ${chalk.dim(`→ ${service.repo}`)} — not cloned`);
+        continue;
+      }
+
+      try {
+        const git = simpleGit(repoDir);
+        const branchSummary = await git.branch();
+        const status = await git.status();
+        const currentBranch = branchSummary.current;
+        const isClean = status.isClean();
+
+        const branchDisplay = currentBranch === service.branch
+          ? currentBranch
+          : chalk.yellow(currentBranch);
+
+        const dirtyIndicator = isClean ? '' : chalk.red(' (uncommitted changes)');
+        const pathIndicator = service.path ? chalk.dim(` ./${service.path}`) : '';
+
+        console.log(`  ${chalk.green('●')} ${name}${pathIndicator} ${chalk.dim(`[${branchDisplay}]`)}${dirtyIndicator}`);
       } catch {
         console.log(`  ${chalk.red('✗')} ${name} ${chalk.dim('— error reading repo')}`);
       }
     }
 
     // Branch divergence warning
+    const defaultBranches = new Set(Object.values(config.services).map(s => s.branch));
     if (defaultBranches.size > 0) {
       const branches = new Map<string, string[]>();
       for (const name of serviceNames) {
-        const serviceDir = path.join(reposDir, name);
-        if (!fs.existsSync(serviceDir)) continue;
+        const repoDir = getServiceRepoDir(name, config, cwd);
+        if (!fs.existsSync(repoDir)) continue;
         try {
-          const git = simpleGit(serviceDir);
+          const git = simpleGit(repoDir);
           const currentBranch = (await git.branch()).current;
           if (!branches.has(currentBranch)) branches.set(currentBranch, []);
-          const existing = branches.get(currentBranch);
-          if (existing) {
-            existing.push(name);
-          } else {
-            branches.set(currentBranch, [name]);
-          }
+          branches.get(currentBranch)!.push(name);
         } catch {
           // skip unreadable repos
         }

@@ -7,6 +7,7 @@ export interface ServiceConfig {
   branch: string;
   language?: string;
   description?: string;
+  path?: string;
 }
 
 export interface WorkspaceConfig {
@@ -133,9 +134,82 @@ export function updateService(
   if (!config.services[name]) {
     return false;
   }
-  config.services[name] = {
+  const updated = {
     ...config.services[name],
     ...updates,
   };
+  // Remove keys explicitly set to undefined (e.g., clearing path)
+  for (const key of Object.keys(updates)) {
+    if (updates[key as keyof ServiceConfig] === undefined) {
+      delete updated[key as keyof ServiceConfig];
+    }
+  }
+  config.services[name] = updated;
   return true;
+}
+
+export function deriveRepoName(repoUrl: string): string {
+  let url = repoUrl.trim();
+  // Remove trailing slash
+  url = url.replace(/\/+$/, '');
+  // Strip .git suffix
+  url = url.replace(/\.git$/, '');
+  // Get the last segment after / or : (for SSH URLs like git@host:org/repo)
+  const lastSegment = url.split(/[/:]/).pop() ?? url;
+  return lastSegment;
+}
+
+export interface RepoEntry {
+  url: string;
+  branch: string;
+  services: string[];
+}
+
+export type RepoIndex = Map<string, RepoEntry>;
+
+export function getRepoIndex(config: WorkspaceConfig): RepoIndex {
+  const urlToName = new Map<string, string>();
+  const usedNames = new Set<string>();
+  const index: RepoIndex = new Map();
+
+  for (const [serviceName, service] of Object.entries(config.services)) {
+    const baseName = deriveRepoName(service.repo);
+
+    if (!urlToName.has(service.repo)) {
+      // Determine unique directory name
+      let dirName = baseName;
+      if (usedNames.has(dirName)) {
+        let suffix = 2;
+        while (usedNames.has(`${baseName}-${suffix}`)) {
+          suffix++;
+        }
+        dirName = `${baseName}-${suffix}`;
+      }
+      usedNames.add(dirName);
+      urlToName.set(service.repo, dirName);
+      index.set(dirName, { url: service.repo, branch: service.branch, services: [serviceName] });
+    } else {
+      const dirName = urlToName.get(service.repo)!;
+      const entry = index.get(dirName)!;
+      entry.services.push(serviceName);
+    }
+  }
+
+  return index;
+}
+
+export function getServiceRepoDir(serviceName: string, config: WorkspaceConfig, cwd: string): string {
+  const service = config.services[serviceName];
+  if (!service) {
+    throw new Error(`Service "${serviceName}" not found in workspace`);
+  }
+
+  const index = getRepoIndex(config);
+  for (const [dirName, entry] of index) {
+    if (entry.url === service.repo) {
+      return path.join(cwd, '.mrw', 'state', 'repos', dirName);
+    }
+  }
+
+  throw new Error(`Repo directory not found for service "${serviceName}"`);
 }

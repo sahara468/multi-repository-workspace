@@ -4,7 +4,7 @@ import ora from 'ora';
 import fs from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
-import { loadWorkspace } from '../lib/workspace.js';
+import { loadWorkspace, getRepoIndex } from '../lib/workspace.js';
 
 export const syncCommand = new Command('sync')
   .description('Clone or pull service repositories')
@@ -27,10 +27,6 @@ export const syncCommand = new Command('sync')
       return;
     }
 
-    const services = serviceName
-      ? { [serviceName]: config.services[serviceName] }
-      : config.services;
-
     if (serviceName && !config.services[serviceName]) {
       console.log(chalk.red(`Service "${serviceName}" not found in workspace.yaml`));
       return;
@@ -39,43 +35,66 @@ export const syncCommand = new Command('sync')
     const reposDir = path.join(cwd, '.mrw', 'state', 'repos');
     fs.mkdirSync(reposDir, { recursive: true });
 
-    const entries = Object.entries(services);
-    const results: { name: string; status: string; branch?: string }[] = [];
+    const fullIndex = getRepoIndex(config);
 
-    for (const [name, service] of entries) {
-      const serviceDir = path.join(reposDir, name);
-      const spinner = ora(`Syncing ${name}...`).start();
+    // Filter repos to only those containing the target service
+    const index = serviceName
+      ? new Map([...fullIndex].filter(([, entry]) => entry.services.includes(serviceName)))
+      : fullIndex;
+
+    // Check for branch conflicts
+    for (const [repoName, entry] of index) {
+      const branches = new Set<string>();
+      for (const svc of entry.services) {
+        branches.add(config.services[svc].branch);
+      }
+      if (branches.size > 1) {
+        const conflicting = entry.services
+          .filter(s => config.services[s].branch !== entry.branch)
+          .map(s => `${s} (${config.services[s].branch})`);
+        console.log(chalk.yellow(`Warning: repo "${repoName}" has conflicting branches: ${entry.branch} vs ${conflicting.join(', ')}. Using "${entry.branch}" for clone.`));
+      }
+    }
+
+    const results: { repoName: string; services: string[]; status: string; branch?: string }[] = [];
+
+    for (const [repoName, entry] of index) {
+      const repoDir = path.join(reposDir, repoName);
+      const serviceLabel = entry.services.length > 1
+        ? `${entry.services.join(', ')}`
+        : entry.services[0];
+      const spinner = ora(`Syncing ${repoName} (${serviceLabel})...`).start();
 
       try {
-        if (fs.existsSync(serviceDir)) {
-          const git = simpleGit(serviceDir);
+        if (fs.existsSync(repoDir)) {
+          const git = simpleGit(repoDir);
 
           // Check for uncommitted changes
           const status = await git.status();
           if (!status.isClean()) {
-            spinner.warn(chalk.yellow(`${name}: skipped (uncommitted changes)`));
-            results.push({ name, status: 'dirty' });
+            spinner.warn(chalk.yellow(`${repoName}: skipped (uncommitted changes)`));
+            results.push({ repoName, services: entry.services, status: 'dirty' });
             continue;
           }
 
           await git.pull();
           const currentBranch = (await git.branch()).current;
-          spinner.succeed(chalk.green(`${name}: updated (${currentBranch})`));
-          results.push({ name, status: 'updated', branch: currentBranch });
+          spinner.succeed(chalk.green(`${repoName}: updated (${currentBranch}) [${serviceLabel}]`));
+          results.push({ repoName, services: entry.services, status: 'updated', branch: currentBranch });
         } else {
-          const cloneArgs = ['--branch', service.branch];
+          const cloneArgs = ['--branch', entry.branch];
           if (depth) {
             cloneArgs.push('--depth', String(depth));
           }
-          await simpleGit().clone(service.repo, serviceDir, cloneArgs);
+          await simpleGit().clone(entry.url, repoDir, cloneArgs);
           const depthLabel = depth ? `, depth ${depth}` : '';
-          spinner.succeed(chalk.green(`${name}: cloned (${service.branch}${depthLabel})`));
-          results.push({ name, status: 'cloned', branch: service.branch });
+          spinner.succeed(chalk.green(`${repoName}: cloned (${entry.branch}${depthLabel}) [${serviceLabel}]`));
+          results.push({ repoName, services: entry.services, status: 'cloned', branch: entry.branch });
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        spinner.fail(chalk.red(`${name}: ${message}`));
-        results.push({ name, status: 'failed' });
+        spinner.fail(chalk.red(`${repoName}: ${message}`));
+        results.push({ repoName, services: entry.services, status: 'failed' });
       }
     }
 
@@ -85,6 +104,7 @@ export const syncCommand = new Command('sync')
     for (const r of results) {
       const icon = r.status === 'cloned' || r.status === 'updated' ? '✓' : r.status === 'dirty' ? '!' : '✗';
       const color = r.status === 'cloned' || r.status === 'updated' ? 'green' : r.status === 'dirty' ? 'yellow' : 'red';
-      console.log(`  ${chalk[color](icon)} ${r.name}: ${r.status}${r.branch ? ` (${r.branch})` : ''}`);
+      const svcList = r.services.length > 1 ? ` → ${r.services.join(', ')}` : '';
+      console.log(`  ${chalk[color](icon)} ${r.repoName}: ${r.status}${r.branch ? ` (${r.branch})` : ''}${svcList}`);
     }
   });

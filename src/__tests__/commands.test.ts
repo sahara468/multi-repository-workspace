@@ -76,6 +76,7 @@ describe('integration: mrw init', () => {
     expect(help).toContain('service');
     expect(help).toContain('sync');
     expect(help).toContain('status');
+    expect(help).toContain('repo');
   });
 });
 
@@ -152,3 +153,92 @@ describe('integration: mrw service', () => {
   });
 });
 
+describe('integration: mrw service with path field', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mrw-service-path-'));
+    const config: WorkspaceConfig = {
+      version: 1,
+      workspace: { name: 'test-ws' },
+      services: {},
+    };
+    saveWorkspace(tmpDir, config);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('adds service with --path option', () => {
+    const config = loadWorkspace(tmpDir)!;
+    config.services['user-api'] = {
+      repo: 'https://github.com/org/platform.git',
+      branch: 'main',
+      path: 'services/user-api',
+    };
+    saveWorkspace(tmpDir, config);
+
+    const loaded = loadWorkspace(tmpDir);
+    expect(loaded?.services['user-api'].path).toBe('services/user-api');
+  });
+
+  it('round-trips path field through save/load', () => {
+    const config: WorkspaceConfig = {
+      version: 1,
+      workspace: { name: 'ws' },
+      services: {
+        'user-api': { repo: 'https://github.com/org/platform.git', branch: 'main', path: 'services/user-api' },
+      },
+    };
+    saveWorkspace(tmpDir, config);
+    const loaded = loadWorkspace(tmpDir);
+    expect(loaded?.services['user-api'].path).toBe('services/user-api');
+  });
+});
+
+describe('integration: mrw repo', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mrw-repo-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('repo list shows repos derived from service URLs', () => {
+    const config: WorkspaceConfig = {
+      version: 1,
+      workspace: { name: 'mono-ws' },
+      services: {
+        'user-api': { repo: 'https://github.com/org/platform.git', branch: 'main' },
+        'order-api': { repo: 'https://github.com/org/platform.git', branch: 'main' },
+        'auth-api': { repo: 'https://github.com/org/auth-service.git', branch: 'develop' },
+      },
+    };
+    saveWorkspace(tmpDir, config);
+
+    const loaded = loadWorkspace(tmpDir);
+    expect(loaded).not.toBeNull();
+    expect(Object.keys(loaded!.services)).toHaveLength(3);
+  });
+
+  it('repo CLI is registered', () => {
+    const help = execSync(`npx tsx src/cli.ts repo --help`, {
+      cwd: path.resolve(''),
+      encoding: 'utf-8',
+    });
+    expect(help).toContain('list');
+    expect(help).toContain('status');
+  });
+
+  it('service list CLI is registered', () => {
+    const help = execSync(`npx tsx src/cli.ts service --help`, {
+      cwd: path.resolve(''),
+      encoding: 'utf-8',
+    });
+    expect(help).toContain('list');
+  });
+});

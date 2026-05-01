@@ -42,7 +42,6 @@ vi.mock('ora', () => ({
   })),
 }));
 
-import simpleGit from 'simple-git';
 import inquirer from 'inquirer';
 
 function createTestWorkspace(tmpDir: string): WorkspaceConfig {
@@ -86,7 +85,7 @@ describe('sync command --depth', () => {
 
     expect(mockClone).toHaveBeenCalledWith(
       'https://example.com/order.git',
-      expect.any(String),
+      expect.stringContaining('order'),
       ['--branch', 'main', '--depth', '1'],
     );
   });
@@ -124,16 +123,88 @@ describe('sync command --depth', () => {
   });
 
   it('does not pass depth to pull for existing repositories', async () => {
+    // Repo directories use repo-derived names (order, inventory) not service names
     const reposDir = path.join(tmpDir, '.mrw', 'state', 'repos');
-    fs.mkdirSync(path.join(reposDir, 'order-service'), { recursive: true });
-    fs.mkdirSync(path.join(reposDir, 'inventory-service'), { recursive: true });
+    fs.mkdirSync(path.join(reposDir, 'order'), { recursive: true });
+    fs.mkdirSync(path.join(reposDir, 'inventory'), { recursive: true });
 
     const { syncCommand } = await import('../commands/sync.js');
     await syncCommand.parseAsync(['node', 'test', '--depth', '5']);
 
-    // Both services exist, so pull is called instead of clone
+    // Both repos exist, so pull is called instead of clone
     expect(mockPull).toHaveBeenCalled();
     expect(mockClone).not.toHaveBeenCalled();
+  });
+});
+
+describe('sync command with shared repos', () => {
+  let tmpDir: string;
+  let originalCwd: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mrw-sync-shared-'));
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    vi.clearAllMocks();
+    vi.resetModules();
+    mockClone.mockResolvedValue('');
+    mockPull.mockResolvedValue('');
+    mockStatus.mockResolvedValue({ isClean: () => true });
+    mockBranch.mockResolvedValue({ current: 'main' });
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('clones shared repo only once for multiple services', async () => {
+    const config: WorkspaceConfig = {
+      version: 1,
+      workspace: { name: 'mono-ws' },
+      services: {
+        'user-api': { repo: 'https://github.com/org/platform.git', branch: 'main' },
+        'order-api': { repo: 'https://github.com/org/platform.git', branch: 'main' },
+        'auth-api': { repo: 'https://github.com/org/auth-service.git', branch: 'develop' },
+      },
+    };
+    saveWorkspace(tmpDir, config);
+
+    const { syncCommand } = await import('../commands/sync.js');
+    await syncCommand.parseAsync(['node', 'test']);
+
+    // Should clone 2 repos: platform and auth-service
+    expect(mockClone).toHaveBeenCalledTimes(2);
+    expect(mockClone).toHaveBeenCalledWith(
+      'https://github.com/org/platform.git',
+      expect.stringContaining('platform'),
+      ['--branch', 'main'],
+    );
+    expect(mockClone).toHaveBeenCalledWith(
+      'https://github.com/org/auth-service.git',
+      expect.stringContaining('auth-service'),
+      ['--branch', 'develop'],
+    );
+  });
+
+  it('warns about branch conflicts in shared repos', async () => {
+    const config: WorkspaceConfig = {
+      version: 1,
+      workspace: { name: 'conflict-ws' },
+      services: {
+        'svc-a': { repo: 'https://github.com/org/platform.git', branch: 'main' },
+        'svc-b': { repo: 'https://github.com/org/platform.git', branch: 'develop' },
+      },
+    };
+    saveWorkspace(tmpDir, config);
+
+    const consoleSpy = vi.spyOn(console, 'log');
+    const { syncCommand } = await import('../commands/sync.js');
+    await syncCommand.parseAsync(['node', 'test']);
+
+    const allOutput = consoleSpy.mock.calls.flat().map(String).join(' ');
+    expect(allOutput).toContain('conflicting branches');
+    consoleSpy.mockRestore();
   });
 });
 
@@ -159,8 +230,9 @@ describe('reset command', () => {
   });
 
   it('prompts for confirmation and proceeds when confirmed', async () => {
+    // Repo directories use repo-derived names
     const reposDir = path.join(tmpDir, '.mrw', 'state', 'repos');
-    fs.mkdirSync(path.join(reposDir, 'order-service'), { recursive: true });
+    fs.mkdirSync(path.join(reposDir, 'order'), { recursive: true });
 
     vi.mocked(inquirer.prompt).mockResolvedValue({ confirmed: true });
 
@@ -184,7 +256,7 @@ describe('reset command', () => {
 
   it('skips confirmation prompt with --force flag', async () => {
     const reposDir = path.join(tmpDir, '.mrw', 'state', 'repos');
-    fs.mkdirSync(path.join(reposDir, 'order-service'), { recursive: true });
+    fs.mkdirSync(path.join(reposDir, 'order'), { recursive: true });
 
     const { resetCommand } = await import('../commands/reset.js');
     await resetCommand.parseAsync(['node', 'test', '--force']);
@@ -195,13 +267,13 @@ describe('reset command', () => {
 
   it('targets a single service with --service flag', async () => {
     const reposDir = path.join(tmpDir, '.mrw', 'state', 'repos');
-    fs.mkdirSync(path.join(reposDir, 'order-service'), { recursive: true });
-    fs.mkdirSync(path.join(reposDir, 'inventory-service'), { recursive: true });
+    fs.mkdirSync(path.join(reposDir, 'order'), { recursive: true });
+    fs.mkdirSync(path.join(reposDir, 'inventory'), { recursive: true });
 
     const { resetCommand } = await import('../commands/reset.js');
     await resetCommand.parseAsync(['node', 'test', '--service', 'order-service', '--force']);
 
-    // checkout called only for order-service (main branch)
+    // checkout called only for the order repo (main branch)
     expect(mockCheckout).toHaveBeenCalledWith('main');
     expect(mockCheckout).toHaveBeenCalledTimes(1);
   });
@@ -213,7 +285,7 @@ describe('reset command', () => {
     expect(mockCheckout).not.toHaveBeenCalled();
   });
 
-  it('skips services that are not cloned', async () => {
+  it('skips repos that are not cloned', async () => {
     // Don't create repo directories
     const { resetCommand } = await import('../commands/reset.js');
     await resetCommand.parseAsync(['node', 'test', '--force']);
@@ -223,7 +295,7 @@ describe('reset command', () => {
 
   it('shows summary output after reset', async () => {
     const reposDir = path.join(tmpDir, '.mrw', 'state', 'repos');
-    fs.mkdirSync(path.join(reposDir, 'order-service'), { recursive: true });
+    fs.mkdirSync(path.join(reposDir, 'order'), { recursive: true });
 
     const consoleSpy = vi.spyOn(console, 'log');
     const { resetCommand } = await import('../commands/reset.js');

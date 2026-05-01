@@ -5,6 +5,7 @@ import { statusCommand } from './commands/status.js';
 import { branchCommand } from './commands/branch.js';
 import { checkoutCommand } from './commands/checkout.js';
 import { serviceCommand } from './commands/service.js';
+import { repoCommand } from './commands/repo.js';
 import { resetCommand } from './commands/reset.js';
 
 const program = new Command();
@@ -20,6 +21,7 @@ program.addCommand(statusCommand);
 program.addCommand(branchCommand);
 program.addCommand(checkoutCommand);
 program.addCommand(serviceCommand);
+program.addCommand(repoCommand);
 program.addCommand(resetCommand);
 
 program.parse();

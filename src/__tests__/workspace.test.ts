@@ -10,6 +10,9 @@ import {
   addService,
   removeService,
   updateService,
+  deriveRepoName,
+  getRepoIndex,
+  getServiceRepoDir,
   type WorkspaceConfig,
 } from '../lib/workspace.js';
 
@@ -272,6 +275,131 @@ describe('workspace', () => {
       };
       const result = updateService(config, 'non-existent', { branch: 'develop' });
       expect(result).toBe(false);
+    });
+  });
+
+  describe('deriveRepoName', () => {
+    it('extracts name from HTTPS URL with .git suffix', () => {
+      expect(deriveRepoName('https://github.com/org/platform-services.git')).toBe('platform-services');
+    });
+
+    it('extracts name from HTTPS URL without .git suffix', () => {
+      expect(deriveRepoName('https://github.com/org/my-repo')).toBe('my-repo');
+    });
+
+    it('extracts name from SSH URL', () => {
+      expect(deriveRepoName('git@github.com:org/my-repo')).toBe('my-repo');
+    });
+
+    it('extracts name from SSH URL with .git suffix', () => {
+      expect(deriveRepoName('git@github.com:org/my-repo.git')).toBe('my-repo');
+    });
+
+    it('handles trailing slash', () => {
+      expect(deriveRepoName('https://github.com/org/my-repo/')).toBe('my-repo');
+    });
+
+    it('handles URL with trailing slash and .git', () => {
+      expect(deriveRepoName('https://github.com/org/my-repo.git/')).toBe('my-repo');
+    });
+  });
+
+  describe('getRepoIndex', () => {
+    it('returns single repo for single service', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {
+          'svc-a': { repo: 'https://github.com/org/svc-a.git', branch: 'main' },
+        },
+      };
+      const index = getRepoIndex(config);
+      expect(index.size).toBe(1);
+      expect(index.get('svc-a')!.services).toEqual(['svc-a']);
+    });
+
+    it('groups services sharing the same repo', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {
+          'user-api': { repo: 'https://github.com/org/platform.git', branch: 'main' },
+          'order-api': { repo: 'https://github.com/org/platform.git', branch: 'main' },
+        },
+      };
+      const index = getRepoIndex(config);
+      expect(index.size).toBe(1);
+      expect(index.get('platform')!.services).toEqual(['user-api', 'order-api']);
+    });
+
+    it('handles name collisions with numeric suffix', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {
+          'svc-a': { repo: 'https://github.com/team/app.git', branch: 'main' },
+          'svc-b': { repo: 'https://gitlab.com/org/app.git', branch: 'main' },
+        },
+      };
+      const index = getRepoIndex(config);
+      expect(index.size).toBe(2);
+      expect(index.get('app')!.services).toEqual(['svc-a']);
+      expect(index.get('app-2')!.services).toEqual(['svc-b']);
+    });
+
+    it('handles mixed: shared and unique repos', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {
+          'user-api': { repo: 'https://github.com/org/platform.git', branch: 'main' },
+          'order-api': { repo: 'https://github.com/org/platform.git', branch: 'main' },
+          'auth-api': { repo: 'https://github.com/org/auth-service.git', branch: 'develop' },
+        },
+      };
+      const index = getRepoIndex(config);
+      expect(index.size).toBe(2);
+      expect(index.get('platform')!.services).toEqual(['user-api', 'order-api']);
+      expect(index.get('auth-service')!.services).toEqual(['auth-api']);
+      expect(index.get('auth-service')!.branch).toBe('develop');
+    });
+  });
+
+  describe('getServiceRepoDir', () => {
+    it('returns repo directory for a service', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {
+          'svc-a': { repo: 'https://github.com/org/platform.git', branch: 'main' },
+        },
+      };
+      const dir = getServiceRepoDir('svc-a', config, '/workspace');
+      expect(dir).toBe('/workspace/.mrw/state/repos/platform');
+    });
+
+    it('returns same directory for services sharing a repo', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {
+          'user-api': { repo: 'https://github.com/org/platform.git', branch: 'main' },
+          'order-api': { repo: 'https://github.com/org/platform.git', branch: 'main' },
+        },
+      };
+      const dirA = getServiceRepoDir('user-api', config, '/workspace');
+      const dirB = getServiceRepoDir('order-api', config, '/workspace');
+      expect(dirA).toBe(dirB);
+      expect(dirA).toBe('/workspace/.mrw/state/repos/platform');
+    });
+
+    it('throws for unknown service', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {},
+      };
+      expect(() => getServiceRepoDir('unknown', config, '/workspace')).toThrow('not found');
     });
   });
 });

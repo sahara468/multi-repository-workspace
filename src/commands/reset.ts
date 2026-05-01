@@ -4,7 +4,7 @@ import inquirer from 'inquirer';
 import fs from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
-import { loadWorkspace } from '../lib/workspace.js';
+import { loadWorkspace, getRepoIndex } from '../lib/workspace.js';
 
 export const resetCommand = new Command('reset')
   .description('Reset services to default branch and initial state')
@@ -19,22 +19,26 @@ export const resetCommand = new Command('reset')
       return;
     }
 
-    const services = options.service
-      ? { [options.service]: config.services[options.service] }
-      : config.services;
-
     if (options.service && !config.services[options.service]) {
       console.log(chalk.red(`Service "${options.service}" not found in workspace.yaml`));
       return;
     }
 
-    const serviceNames = Object.keys(services);
+    const fullIndex = getRepoIndex(config);
+
+    // Filter to repos containing the target service
+    const index = options.service
+      ? new Map([...fullIndex].filter(([, entry]) => entry.services.includes(options.service!)))
+      : fullIndex;
+
+    const repoEntries = [...index.entries()];
 
     if (!options.force) {
       console.log(chalk.yellow('Warning: This will discard all uncommitted changes and untracked files.'));
-      console.log(chalk.yellow('Services to reset:'));
-      for (const name of serviceNames) {
-        console.log(chalk.yellow(`  - ${name} (${services[name].branch})`));
+      console.log(chalk.yellow('Repos to reset:'));
+      for (const [repoName, entry] of repoEntries) {
+        const svcList = entry.services.join(', ');
+        console.log(chalk.yellow(`  - ${repoName} (${entry.branch}) [${svcList}]`));
       }
       console.log();
 
@@ -54,31 +58,31 @@ export const resetCommand = new Command('reset')
     }
 
     const reposDir = path.join(cwd, '.mrw', 'state', 'repos');
-    const results: { name: string; status: string; branch?: string }[] = [];
+    const results: { repoName: string; services: string[]; status: string; branch?: string }[] = [];
 
-    for (const name of serviceNames) {
-      const service = services[name];
-      const serviceDir = path.join(reposDir, name);
+    for (const [repoName, entry] of repoEntries) {
+      const repoDir = path.join(reposDir, repoName);
+      const svcList = entry.services.join(', ');
 
-      if (!fs.existsSync(serviceDir)) {
-        console.log(chalk.yellow(`${name}: skipped (not cloned)`));
-        results.push({ name, status: 'skipped' });
+      if (!fs.existsSync(repoDir)) {
+        console.log(chalk.yellow(`${repoName} (${svcList}): skipped (not cloned)`));
+        results.push({ repoName, services: entry.services, status: 'skipped' });
         continue;
       }
 
       try {
-        const git = simpleGit(serviceDir);
+        const git = simpleGit(repoDir);
 
-        await git.checkout(service.branch);
+        await git.checkout(entry.branch);
         await git.clean('f', ['-d']);
-        await git.reset(['--hard', `origin/${service.branch}`]);
+        await git.reset(['--hard', `origin/${entry.branch}`]);
 
-        console.log(chalk.green(`${name}: reset (${service.branch})`));
-        results.push({ name, status: 'reset', branch: service.branch });
+        console.log(chalk.green(`${repoName} (${svcList}): reset (${entry.branch})`));
+        results.push({ repoName, services: entry.services, status: 'reset', branch: entry.branch });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        console.log(chalk.red(`${name}: ${message}`));
-        results.push({ name, status: 'failed' });
+        console.log(chalk.red(`${repoName} (${svcList}): ${message}`));
+        results.push({ repoName, services: entry.services, status: 'failed' });
       }
     }
 
@@ -88,6 +92,7 @@ export const resetCommand = new Command('reset')
     for (const r of results) {
       const icon = r.status === 'reset' ? '✓' : r.status === 'skipped' ? '!' : '✗';
       const color = r.status === 'reset' ? 'green' : r.status === 'skipped' ? 'yellow' : 'red';
-      console.log(`  ${chalk[color](icon)} ${r.name}: ${r.status}${r.branch ? ` (${r.branch})` : ''}`);
+      const svcList = r.services.length > 1 ? ` → ${r.services.join(', ')}` : '';
+      console.log(`  ${chalk[color](icon)} ${r.repoName}: ${r.status}${r.branch ? ` (${r.branch})` : ''}${svcList}`);
     }
   });
