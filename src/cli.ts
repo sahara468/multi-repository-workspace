@@ -4,10 +4,7 @@ import { syncCommand } from './commands/sync.js';
 import { statusCommand } from './commands/status.js';
 import { branchCommand } from './commands/branch.js';
 import { checkoutCommand } from './commands/checkout.js';
-import { specCommand } from './commands/spec.js';
-import { changeCommand } from './commands/change.js';
 import { serviceCommand } from './commands/service.js';
-import { indexCommand } from './commands/index.js';
 import { resetCommand } from './commands/reset.js';
 
 const program = new Command();
@@ -22,10 +19,7 @@ program.addCommand(syncCommand);
 program.addCommand(statusCommand);
 program.addCommand(branchCommand);
 program.addCommand(checkoutCommand);
-program.addCommand(specCommand);
-program.addCommand(changeCommand);
 program.addCommand(serviceCommand);
-program.addCommand(indexCommand);
 program.addCommand(resetCommand);
 
 program.parse();

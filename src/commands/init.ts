@@ -84,18 +84,7 @@ async function initInteractive(cwd: string, servicesFile?: string): Promise<void
   const spinner = ora('Creating workspace...').start();
 
   // Create directory structure
-  const dirs = [
-    '.mrw/state/repos',
-    '.mrw/state/index',
-    '.mrw/changes',
-    'specs/capabilities',
-    'specs/entries',
-    'specs/constraints',
-  ];
-
-  for (const dir of dirs) {
-    fs.mkdirSync(path.join(cwd, dir), { recursive: true });
-  }
+  fs.mkdirSync(path.join(cwd, '.mrw/state/repos'), { recursive: true });
 
   // Create .gitignore
   const gitignorePath = path.join(cwd, '.gitignore');
@@ -152,18 +141,7 @@ async function initFromTemplate(cwd: string, templateName: string): Promise<void
   const spinner = ora(`Creating workspace from template "${templateName}"...`).start();
 
   // Create directory structure
-  const dirs = [
-    '.mrw/state/repos',
-    '.mrw/state/index',
-    '.mrw/changes',
-    'specs/capabilities',
-    'specs/entries',
-    'specs/constraints',
-  ];
-
-  for (const dir of dirs) {
-    fs.mkdirSync(path.join(cwd, dir), { recursive: true });
-  }
+  fs.mkdirSync(path.join(cwd, '.mrw/state/repos'), { recursive: true });
 
   // Create .gitignore
   const gitignorePath = path.join(cwd, '.gitignore');
