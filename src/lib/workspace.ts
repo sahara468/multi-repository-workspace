@@ -10,6 +10,11 @@ export interface ServiceConfig {
   path?: string;
 }
 
+export interface ArchConfig {
+  repo: string;
+  branch: string;
+}
+
 export interface WorkspaceConfig {
   version: number;
   workspace: {
@@ -18,6 +23,7 @@ export interface WorkspaceConfig {
     domain?: string;
   };
   services: Record<string, ServiceConfig>;
+  arch?: ArchConfig;
 }
 
 export function loadWorkspace(cwd: string): WorkspaceConfig | null {
@@ -207,9 +213,36 @@ export function getServiceRepoDir(serviceName: string, config: WorkspaceConfig, 
   const index = getRepoIndex(config);
   for (const [dirName, entry] of index) {
     if (entry.url === service.repo) {
-      return path.join(cwd, '.mrw', 'state', 'repos', dirName);
+      return path.join(cwd, 'repos', dirName);
     }
   }
 
   throw new Error(`Repo directory not found for service "${serviceName}"`);
+}
+
+export function isDesignDriven(config: WorkspaceConfig): boolean {
+  return config.arch !== undefined;
+}
+
+export function archRepoDir(config: WorkspaceConfig, cwd: string): string {
+  if (!config.arch) {
+    throw new Error('Workspace is not design-driven (no arch config)');
+  }
+  const repoName = deriveRepoName(config.arch.repo);
+  return path.join(cwd, repoName);
+}
+
+export function getArchRepoEntry(config: WorkspaceConfig): { dirName: string; dir: string; url: string; branch: string } | null {
+  if (!config.arch) return null;
+  const dirName = deriveRepoName(config.arch.repo);
+  return {
+    dirName,
+    dir: '', // Caller must supply cwd to build full path
+    url: config.arch.repo,
+    branch: config.arch.branch,
+  };
+}
+
+export function getReposDir(cwd: string): string {
+  return path.join(cwd, 'repos');
 }

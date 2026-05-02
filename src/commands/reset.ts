@@ -57,7 +57,7 @@ export const resetCommand = new Command('reset')
       }
     }
 
-    const reposDir = path.join(cwd, '.mrw', 'state', 'repos');
+    const reposDir = path.join(cwd, 'repos');
     const results: { repoName: string; services: string[]; status: string; branch?: string }[] = [];
 
     for (const [repoName, entry] of repoEntries) {

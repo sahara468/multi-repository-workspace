@@ -11,6 +11,8 @@ import {
   loadServiceFile,
   importServices,
   getRepoIndex,
+  isDesignDriven,
+  archRepoDir,
 } from '../lib/workspace.js';
 
 export const serviceCommand = new Command('service')
@@ -31,6 +33,11 @@ serviceCommand.addCommand(
 
       if (!config) {
         console.log(chalk.red('No workspace found. Run `mrw init` first.'));
+        return;
+      }
+
+      if (isDesignDriven(config)) {
+        console.log(chalk.red('Service add is not allowed in design-driven workspaces. Use `mrw service import` to update services from the arch repo.'));
         return;
       }
 
@@ -65,6 +72,11 @@ serviceCommand.addCommand(
         return;
       }
 
+      if (isDesignDriven(config)) {
+        console.log(chalk.red('Service remove is not allowed in design-driven workspaces. Use `mrw service import` to update services from the arch repo.'));
+        return;
+      }
+
       const service = config.services[name];
       if (!service) {
         console.log(chalk.red(`Service "${name}" not found in workspace.yaml.`));
@@ -93,9 +105,9 @@ serviceCommand.addCommand(
           const otherServices = repoEntry.services.filter(s => s !== name);
           console.log(chalk.yellow(`  Warning: repo "${repoDirName}" is still used by: ${otherServices.join(', ')}`));
         } else {
-          const repoDir = path.join(cwd, '.mrw', 'state', 'repos', repoDirName);
+          const repoDir = path.join(cwd, 'repos', repoDirName);
           if (fs.existsSync(repoDir)) {
-            console.log(chalk.yellow(`  Warning: cloned repository at .mrw/state/repos/${repoDirName}/ is now orphaned (no services reference it).`));
+            console.log(chalk.yellow(`  Warning: cloned repository at repos/${repoDirName}/ is now orphaned (no services reference it).`));
           }
         }
       }
@@ -153,7 +165,7 @@ serviceCommand.addCommand(
 
 serviceCommand.addCommand(
   new Command('import')
-    .option('--file <path>', 'Path to services YAML file (default: services.yaml)')
+    .option('--file <path>', 'Path to services YAML file')
     .description('Import services from a YAML file')
     .action((options: { file?: string }) => {
       const cwd = process.cwd();
@@ -164,9 +176,16 @@ serviceCommand.addCommand(
         return;
       }
 
-      const filePath = options.file
-        ? path.resolve(cwd, options.file)
-        : path.join(cwd, 'services.yaml');
+      // Default file path: arch repo's services.yaml in design-driven mode, else cwd/services.yaml
+      let filePath: string;
+      if (options.file) {
+        filePath = path.resolve(cwd, options.file);
+      } else if (isDesignDriven(config)) {
+        const archPath = archRepoDir(config, cwd);
+        filePath = path.join(archPath, 'services.yaml');
+      } else {
+        filePath = path.join(cwd, 'services.yaml');
+      }
 
       if (!fs.existsSync(filePath)) {
         console.log(chalk.red(`Services file not found: ${filePath}`));

@@ -4,18 +4,26 @@ import ora from 'ora';
 import inquirer from 'inquirer';
 import fs from 'node:fs';
 import path from 'node:path';
-import { saveWorkspace, loadServiceFile, importServices, type WorkspaceConfig } from '../lib/workspace.js';
+import simpleGit from 'simple-git';
+import { saveWorkspace, loadServiceFile, importServices, deriveRepoName, type WorkspaceConfig } from '../lib/workspace.js';
 
 export const initCommand = new Command('init')
   .description('Initialize a new MRW workspace in the current directory')
   .option('--from-template <template>', 'Initialize from a template')
+  .option('--from-arch <repo-url>', 'Initialize from a service architecture design repo')
+  .option('--arch-branch <branch>', 'Branch for the arch repo (default: main)', 'main')
   .option('--services-file <path>', 'Import services from a YAML file (default: services.yaml)')
-  .action(async (options: { fromTemplate?: string; servicesFile?: string }) => {
+  .action(async (options: { fromTemplate?: string; fromArch?: string; archBranch?: string; servicesFile?: string }) => {
     const cwd = process.cwd();
     const workspacePath = path.join(cwd, 'workspace.yaml');
 
     if (fs.existsSync(workspacePath)) {
       console.log(chalk.yellow('Workspace already exists in this directory.'));
+      return;
+    }
+
+    if (options.fromArch) {
+      await initFromArch(cwd, options.fromArch, options.archBranch ?? 'main');
       return;
     }
 
@@ -84,7 +92,7 @@ async function initInteractive(cwd: string, servicesFile?: string): Promise<void
   const spinner = ora('Creating workspace...').start();
 
   // Create directory structure
-  fs.mkdirSync(path.join(cwd, '.mrw/state/repos'), { recursive: true });
+  fs.mkdirSync(path.join(cwd, 'repos'), { recursive: true });
 
   // Create .gitignore
   const gitignorePath = path.join(cwd, '.gitignore');
@@ -92,10 +100,10 @@ async function initInteractive(cwd: string, servicesFile?: string): Promise<void
     ? fs.readFileSync(gitignorePath, 'utf-8')
     : '';
 
-  if (!gitignoreContent.includes('.mrw/state/')) {
+  if (!gitignoreContent.includes('.mrw/')) {
     const updated = gitignoreContent
-      ? gitignoreContent.trimEnd() + '\n.mrw/state/\n'
-      : '.mrw/state/\n';
+      ? gitignoreContent.trimEnd() + '\n.mrw/\n'
+      : '.mrw/\n';
     fs.writeFileSync(gitignorePath, updated);
   }
 
@@ -141,7 +149,7 @@ async function initFromTemplate(cwd: string, templateName: string): Promise<void
   const spinner = ora(`Creating workspace from template "${templateName}"...`).start();
 
   // Create directory structure
-  fs.mkdirSync(path.join(cwd, '.mrw/state/repos'), { recursive: true });
+  fs.mkdirSync(path.join(cwd, 'repos'), { recursive: true });
 
   // Create .gitignore
   const gitignorePath = path.join(cwd, '.gitignore');
@@ -149,10 +157,10 @@ async function initFromTemplate(cwd: string, templateName: string): Promise<void
     ? fs.readFileSync(gitignorePath, 'utf-8')
     : '';
 
-  if (!gitignoreContent.includes('.mrw/state/')) {
+  if (!gitignoreContent.includes('.mrw/')) {
     const updated = gitignoreContent
-      ? gitignoreContent.trimEnd() + '\n.mrw/state/\n'
-      : '.mrw/state/\n';
+      ? gitignoreContent.trimEnd() + '\n.mrw/\n'
+      : '.mrw/\n';
     fs.writeFileSync(gitignorePath, updated);
   }
 
@@ -160,5 +168,86 @@ async function initFromTemplate(cwd: string, templateName: string): Promise<void
 
   spinner.succeed(chalk.green(`Workspace initialized from template "${templateName}"!`));
   console.log(chalk.dim(`  Created workspace.yaml with ${Object.keys(config.services).length} service(s)`));
+  console.log(chalk.dim('  Run `mrw sync` to clone service repositories'));
+}
+
+async function initFromArch(cwd: string, repoUrl: string, branch: string): Promise<void> {
+  const archRepoName = deriveRepoName(repoUrl);
+  const archRepoPath = path.join(cwd, archRepoName);
+
+  // Clone the arch repo
+  const cloneSpinner = ora(`Cloning arch repo ${archRepoName}...`).start();
+  try {
+    await simpleGit().clone(repoUrl, archRepoPath, ['--branch', branch]);
+    cloneSpinner.succeed(chalk.green(`Cloned arch repo: ${archRepoName} (${branch})`));
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    cloneSpinner.fail(chalk.red(`Failed to clone arch repo: ${message}`));
+    return;
+  }
+
+  // Validate: services.yaml is required
+  const servicesYamlPath = path.join(archRepoPath, 'services.yaml');
+  if (!fs.existsSync(servicesYamlPath)) {
+    console.log(chalk.red(`Arch repo must contain services.yaml at its root.`));
+    fs.rmSync(archRepoPath, { recursive: true, force: true });
+    return;
+  }
+
+  // Warn about missing convention directories
+  const specsDir = path.join(archRepoPath, 'specs');
+  const archDir = path.join(archRepoPath, 'arch');
+  if (!fs.existsSync(specsDir)) {
+    console.log(chalk.yellow(`Warning: arch repo is missing "specs/" directory (convention)`));
+  }
+  if (!fs.existsSync(archDir)) {
+    console.log(chalk.yellow(`Warning: arch repo is missing "arch/" directory (convention)`));
+  }
+
+  // Import services from arch repo's services.yaml
+  const config: WorkspaceConfig = {
+    version: 1,
+    workspace: { name: archRepoName },
+    services: {},
+    arch: { repo: repoUrl, branch },
+  };
+
+  const importSpinner = ora('Importing services from arch repo...').start();
+  try {
+    const serviceFile = loadServiceFile(servicesYamlPath);
+    const result = importServices(config, serviceFile.services);
+    importSpinner.succeed(
+      chalk.green(`Imported ${result.added.length + result.updated.length} service(s) from arch repo`)
+    );
+    if (result.added.length > 0) {
+      console.log(chalk.dim(`  Added: ${result.added.join(', ')}`));
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    importSpinner.warn(chalk.yellow(`Failed to import services: ${message}`));
+  }
+
+  // Create directory structure
+  fs.mkdirSync(path.join(cwd, 'repos'), { recursive: true });
+
+  // Create .gitignore
+  const gitignorePath = path.join(cwd, '.gitignore');
+  const gitignoreContent = fs.existsSync(gitignorePath)
+    ? fs.readFileSync(gitignorePath, 'utf-8')
+    : '';
+
+  if (!gitignoreContent.includes('.mrw/')) {
+    const updated = gitignoreContent
+      ? gitignoreContent.trimEnd() + '\n.mrw/\n'
+      : '.mrw/\n';
+    fs.writeFileSync(gitignorePath, updated);
+  }
+
+  // Write workspace.yaml
+  saveWorkspace(cwd, config);
+
+  console.log(chalk.green('Design-driven workspace initialized!'));
+  console.log(chalk.dim(`  Arch repo: ${archRepoName}/`));
+  console.log(chalk.dim(`  Services: ${Object.keys(config.services).length}`));
   console.log(chalk.dim('  Run `mrw sync` to clone service repositories'));
 }

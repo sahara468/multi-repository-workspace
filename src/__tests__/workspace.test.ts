@@ -13,7 +13,12 @@ import {
   deriveRepoName,
   getRepoIndex,
   getServiceRepoDir,
+  isDesignDriven,
+  archRepoDir,
+  getArchRepoEntry,
+  getReposDir,
   type WorkspaceConfig,
+  type ArchConfig,
 } from '../lib/workspace.js';
 
 describe('workspace', () => {
@@ -87,6 +92,22 @@ describe('workspace', () => {
       expect(loaded.services['svc'].language).toBe('go');
       expect(loaded.services['svc'].description).toBe('A service');
     });
+
+    it('loads arch config when present', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {},
+        arch: { repo: 'https://github.com/org/arch-repo.git', branch: 'main' },
+      };
+      saveWorkspace(tmpDir, config);
+
+      const loaded = loadWorkspace(tmpDir);
+      if (!loaded) throw new Error('unexpected null');
+      expect(loaded.arch).toBeDefined();
+      expect(loaded.arch!.repo).toBe('https://github.com/org/arch-repo.git');
+      expect(loaded.arch!.branch).toBe('main');
+    });
   });
 
   describe('saveWorkspace', () => {
@@ -122,6 +143,20 @@ describe('workspace', () => {
       expect(Object.keys(loaded.services)).toHaveLength(2);
       expect(loaded.services['billing-svc'].branch).toBe('main');
       expect(loaded.services['payment-svc'].language).toBe('typescript');
+    });
+
+    it('round-trips arch config', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'arch-ws' },
+        services: {},
+        arch: { repo: 'https://github.com/org/design.git', branch: 'develop' },
+      };
+      saveWorkspace(tmpDir, config);
+      const loaded = loadWorkspace(tmpDir);
+      if (!loaded) throw new Error('unexpected null');
+      expect(loaded.arch!.repo).toBe('https://github.com/org/design.git');
+      expect(loaded.arch!.branch).toBe('develop');
     });
   });
 
@@ -366,7 +401,7 @@ describe('workspace', () => {
   });
 
   describe('getServiceRepoDir', () => {
-    it('returns repo directory for a service', () => {
+    it('returns repo directory under repos/', () => {
       const config: WorkspaceConfig = {
         version: 1,
         workspace: { name: 'ws' },
@@ -375,7 +410,7 @@ describe('workspace', () => {
         },
       };
       const dir = getServiceRepoDir('svc-a', config, '/workspace');
-      expect(dir).toBe('/workspace/.mrw/state/repos/platform');
+      expect(dir).toBe('/workspace/repos/platform');
     });
 
     it('returns same directory for services sharing a repo', () => {
@@ -390,7 +425,7 @@ describe('workspace', () => {
       const dirA = getServiceRepoDir('user-api', config, '/workspace');
       const dirB = getServiceRepoDir('order-api', config, '/workspace');
       expect(dirA).toBe(dirB);
-      expect(dirA).toBe('/workspace/.mrw/state/repos/platform');
+      expect(dirA).toBe('/workspace/repos/platform');
     });
 
     it('throws for unknown service', () => {
@@ -400,6 +435,79 @@ describe('workspace', () => {
         services: {},
       };
       expect(() => getServiceRepoDir('unknown', config, '/workspace')).toThrow('not found');
+    });
+  });
+
+  describe('isDesignDriven', () => {
+    it('returns true when arch is set', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {},
+        arch: { repo: 'https://github.com/org/arch.git', branch: 'main' },
+      };
+      expect(isDesignDriven(config)).toBe(true);
+    });
+
+    it('returns false when arch is not set', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {},
+      };
+      expect(isDesignDriven(config)).toBe(false);
+    });
+  });
+
+  describe('archRepoDir', () => {
+    it('returns arch repo directory at workspace root', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {},
+        arch: { repo: 'https://github.com/org/order-service-arch.git', branch: 'main' },
+      };
+      expect(archRepoDir(config, '/workspace')).toBe('/workspace/order-service-arch');
+    });
+
+    it('throws when arch is not set', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {},
+      };
+      expect(() => archRepoDir(config, '/workspace')).toThrow('not design-driven');
+    });
+  });
+
+  describe('getArchRepoEntry', () => {
+    it('returns entry when arch is set', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {},
+        arch: { repo: 'https://github.com/org/design.git', branch: 'develop' },
+      };
+      const entry = getArchRepoEntry(config);
+      expect(entry).not.toBeNull();
+      expect(entry!.dirName).toBe('design');
+      expect(entry!.url).toBe('https://github.com/org/design.git');
+      expect(entry!.branch).toBe('develop');
+    });
+
+    it('returns null when arch is not set', () => {
+      const config: WorkspaceConfig = {
+        version: 1,
+        workspace: { name: 'ws' },
+        services: {},
+      };
+      expect(getArchRepoEntry(config)).toBeNull();
+    });
+  });
+
+  describe('getReposDir', () => {
+    it('returns repos/ path under cwd', () => {
+      expect(getReposDir('/workspace')).toBe('/workspace/repos');
     });
   });
 });

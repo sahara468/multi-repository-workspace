@@ -4,7 +4,7 @@ import ora from 'ora';
 import fs from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
-import { loadWorkspace, getRepoIndex } from '../lib/workspace.js';
+import { loadWorkspace, getRepoIndex, archRepoDir, isDesignDriven } from '../lib/workspace.js';
 
 export const syncCommand = new Command('sync')
   .description('Clone or pull service repositories')
@@ -32,7 +32,7 @@ export const syncCommand = new Command('sync')
       return;
     }
 
-    const reposDir = path.join(cwd, '.mrw', 'state', 'repos');
+    const reposDir = path.join(cwd, 'repos');
     fs.mkdirSync(reposDir, { recursive: true });
 
     const fullIndex = getRepoIndex(config);
@@ -56,8 +56,41 @@ export const syncCommand = new Command('sync')
       }
     }
 
-    const results: { repoName: string; services: string[]; status: string; branch?: string }[] = [];
+    const results: { repoName: string; services: string[]; status: string; branch?: string; isArch?: boolean }[] = [];
 
+    // Sync arch repo first (if design-driven and not filtering by service)
+    if (isDesignDriven(config) && !serviceName) {
+      const archPath = archRepoDir(config, cwd);
+      const archName = path.basename(archPath);
+      const spinner = ora(`Syncing ${archName} [arch]...`).start();
+
+      try {
+        if (fs.existsSync(archPath)) {
+          const git = simpleGit(archPath);
+          const status = await git.status();
+          if (!status.isClean()) {
+            spinner.warn(chalk.yellow(`${archName} [arch]: skipped (uncommitted changes)`));
+            results.push({ repoName: archName, services: [], status: 'dirty', isArch: true });
+          } else {
+            await git.pull();
+            const currentBranch = (await git.branch()).current;
+            spinner.succeed(chalk.green(`${archName} [arch]: updated (${currentBranch})`));
+            results.push({ repoName: archName, services: [], status: 'updated', branch: currentBranch, isArch: true });
+          }
+        } else {
+          // Arch repo should have been cloned by init, but handle missing case
+          await simpleGit().clone(config.arch!.repo, archPath, ['--branch', config.arch!.branch]);
+          spinner.succeed(chalk.green(`${archName} [arch]: cloned (${config.arch!.branch})`));
+          results.push({ repoName: archName, services: [], status: 'cloned', branch: config.arch!.branch, isArch: true });
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        spinner.fail(chalk.red(`${archName} [arch]: ${message}`));
+        results.push({ repoName: archName, services: [], status: 'failed', isArch: true });
+      }
+    }
+
+    // Sync service repos
     for (const [repoName, entry] of index) {
       const repoDir = path.join(reposDir, repoName);
       const serviceLabel = entry.services.length > 1
@@ -104,7 +137,8 @@ export const syncCommand = new Command('sync')
     for (const r of results) {
       const icon = r.status === 'cloned' || r.status === 'updated' ? '✓' : r.status === 'dirty' ? '!' : '✗';
       const color = r.status === 'cloned' || r.status === 'updated' ? 'green' : r.status === 'dirty' ? 'yellow' : 'red';
-      const svcList = r.services.length > 1 ? ` → ${r.services.join(', ')}` : '';
-      console.log(`  ${chalk[color](icon)} ${r.repoName}: ${r.status}${r.branch ? ` (${r.branch})` : ''}${svcList}`);
+      const archLabel = r.isArch ? ' [arch]' : '';
+      const svcList = !r.isArch && r.services.length > 1 ? ` → ${r.services.join(', ')}` : '';
+      console.log(`  ${chalk[color](icon)} ${r.repoName}${archLabel}: ${r.status}${r.branch ? ` (${r.branch})` : ''}${svcList}`);
     }
   });

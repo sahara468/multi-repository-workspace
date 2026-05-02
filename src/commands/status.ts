@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import fs from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
-import { loadWorkspace, getRepoIndex, getServiceRepoDir } from '../lib/workspace.js';
+import { loadWorkspace, getRepoIndex, getServiceRepoDir, archRepoDir, isDesignDriven } from '../lib/workspace.js';
 
 export const statusCommand = new Command('status')
   .description('Show workspace status')
@@ -24,9 +24,43 @@ export const statusCommand = new Command('status')
     if (config.workspace.domain) {
       console.log(chalk.dim(`  Domain: ${config.workspace.domain}`));
     }
+    if (isDesignDriven(config)) {
+      console.log(chalk.dim(`  Mode: design-driven`));
+    }
     console.log();
 
-    const reposDir = path.join(cwd, '.mrw', 'state', 'repos');
+    const reposDir = path.join(cwd, 'repos');
+
+    // Arch repo
+    if (isDesignDriven(config)) {
+      const archPath = archRepoDir(config, cwd);
+      const archName = path.basename(archPath);
+
+      console.log(chalk.bold('Arch Repository:'));
+      if (!fs.existsSync(archPath)) {
+        console.log(`  ${chalk.yellow('○')} ${archName} ${chalk.dim('[arch] — not cloned')}`);
+      } else {
+        try {
+          const git = simpleGit(archPath);
+          const branchSummary = await git.branch();
+          const status = await git.status();
+          const currentBranch = branchSummary.current;
+          const isClean = status.isClean();
+
+          const branchDisplay = currentBranch === config.arch!.branch
+            ? currentBranch
+            : chalk.yellow(currentBranch);
+
+          const dirtyIndicator = isClean ? '' : chalk.red(' (uncommitted changes)');
+
+          console.log(`  ${chalk.green('●')} ${archName} ${chalk.dim('[arch]')} ${chalk.dim(`[${branchDisplay}]`)}${dirtyIndicator}`);
+        } catch {
+          console.log(`  ${chalk.red('✗')} ${archName} ${chalk.dim('[arch] — error reading repo')}`);
+        }
+      }
+      console.log();
+    }
+
     const index = getRepoIndex(config);
 
     // Repos

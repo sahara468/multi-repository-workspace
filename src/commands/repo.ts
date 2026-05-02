@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import fs from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
-import { loadWorkspace, getRepoIndex } from '../lib/workspace.js';
+import { loadWorkspace, getRepoIndex, archRepoDir, isDesignDriven } from '../lib/workspace.js';
 
 export const repoCommand = new Command('repo')
   .description('Manage repositories in the workspace');
@@ -20,14 +20,29 @@ repoCommand.addCommand(
         return;
       }
 
+      // Arch repo
+      if (isDesignDriven(config)) {
+        const archPath = archRepoDir(config, cwd);
+        const archName = path.basename(archPath);
+        const cloned = fs.existsSync(archPath);
+        const statusIcon = cloned ? chalk.green('●') : chalk.yellow('○');
+
+        console.log(`  ${statusIcon} ${archName} ${chalk.dim('[arch]')}`);
+        console.log(chalk.dim(`    url: ${config.arch!.repo}`));
+        console.log(chalk.dim(`    branch: ${config.arch!.branch}`));
+        if (!cloned) {
+          console.log(chalk.dim(`    status: not cloned`));
+        }
+      }
+
       const index = getRepoIndex(config);
-      if (index.size === 0) {
+      if (index.size === 0 && !isDesignDriven(config)) {
         console.log(chalk.dim('No repositories in this workspace.'));
         return;
       }
 
       for (const [repoName, entry] of index) {
-        const repoDir = path.join(cwd, '.mrw', 'state', 'repos', repoName);
+        const repoDir = path.join(cwd, 'repos', repoName);
         const cloned = fs.existsSync(repoDir);
         const statusIcon = cloned ? chalk.green('●') : chalk.yellow('○');
         const svcList = entry.services.join(', ');
@@ -55,11 +70,43 @@ repoCommand.addCommand(
         return;
       }
 
-      const reposDir = path.join(cwd, '.mrw', 'state', 'repos');
+      // Arch repo
+      if (isDesignDriven(config)) {
+        const archPath = archRepoDir(config, cwd);
+        const archName = path.basename(archPath);
+
+        if (!fs.existsSync(archPath)) {
+          console.log(`  ${chalk.yellow('○')} ${archName} ${chalk.dim('[arch] — not cloned')}`);
+          console.log();
+        } else {
+          try {
+            const git = simpleGit(archPath);
+            const branchSummary = await git.branch();
+            const status = await git.status();
+            const currentBranch = branchSummary.current;
+            const isClean = status.isClean();
+
+            const branchDisplay = currentBranch === config.arch!.branch
+              ? currentBranch
+              : chalk.yellow(currentBranch);
+
+            const dirtyIndicator = isClean ? '' : chalk.red(' (uncommitted changes)');
+
+            console.log(`  ${chalk.green('●')} ${archName} ${chalk.dim('[arch]')} ${chalk.dim(`[${branchDisplay}]`)}${dirtyIndicator}`);
+          } catch {
+            console.log(`  ${chalk.red('✗')} ${archName} ${chalk.dim('[arch] — error reading repo')}`);
+          }
+          console.log();
+        }
+      }
+
+      const reposDir = path.join(cwd, 'repos');
       const index = getRepoIndex(config);
 
       if (index.size === 0) {
-        console.log(chalk.dim('No repositories in this workspace.'));
+        if (!isDesignDriven(config)) {
+          console.log(chalk.dim('No repositories in this workspace.'));
+        }
         return;
       }
 

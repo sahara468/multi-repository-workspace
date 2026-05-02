@@ -25,7 +25,7 @@ describe('integration: mrw init', () => {
     };
 
     const dirs = [
-      '.mrw/state/repos',
+      'repos',
     ];
 
     for (const dir of dirs) {
@@ -43,13 +43,13 @@ describe('integration: mrw init', () => {
     expect(loaded?.workspace.name).toBe('test-ws');
   });
 
-  it('generates .gitignore with .mrw/state/ entry', () => {
+  it('generates .gitignore with .mrw/ entry', () => {
     const gitignorePath = path.join(tmpDir, '.gitignore');
-    const gitignoreContent = '.mrw/state/\n';
+    const gitignoreContent = '.mrw/\n';
     fs.writeFileSync(gitignorePath, gitignoreContent);
 
     const content = fs.readFileSync(gitignorePath, 'utf-8');
-    expect(content).toContain('.mrw/state/');
+    expect(content).toContain('.mrw/');
   });
 
   it('imports services from services.yaml during init', () => {
@@ -240,5 +240,35 @@ describe('integration: mrw repo', () => {
       encoding: 'utf-8',
     });
     expect(help).toContain('list');
+  });
+});
+
+describe('integration: design-driven workspace', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mrw-design-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('saves and loads workspace with arch config', () => {
+    const config: WorkspaceConfig = {
+      version: 1,
+      workspace: { name: 'design-ws' },
+      services: {
+        'order-service': { repo: 'https://github.com/org/order.git', branch: 'main' },
+      },
+      arch: { repo: 'https://github.com/org/order-service-arch.git', branch: 'main' },
+    };
+    saveWorkspace(tmpDir, config);
+
+    const loaded = loadWorkspace(tmpDir);
+    expect(loaded).not.toBeNull();
+    expect(loaded?.arch).toBeDefined();
+    expect(loaded?.arch?.repo).toBe('https://github.com/org/order-service-arch.git');
+    expect(loaded?.arch?.branch).toBe('main');
   });
 });

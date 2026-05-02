@@ -6,7 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MRW (Multi-Repository Workspace) is a TypeScript/Node.js CLI tool (`mrw` command) that manages multiple microservice repositories as a unified business workspace. It is built on ESM-only architecture (`"type": "module"` in package.json).
 
-**Key design:** Repos, not services, are the unit of cloning. Multiple services can share a single git repository (monorepo). The `mrw sync` command clones each unique repo once under `.mrw/state/repos/<repo-name>/` (derived from the git URL), and services reference their repo via the `repo` field in `workspace.yaml`. An optional `path` field on a service specifies its subdirectory within a monorepo.
+**Key design:** Repos, not services, are the unit of cloning. Multiple services can share a single git repository (monorepo). The `mrw sync` command clones each unique repo once under `repos/<repo-name>/` (derived from the git URL), and services reference their repo via the `repo` field in `workspace.yaml`. An optional `path` field on a service specifies its subdirectory within a monorepo.
+
+**Two workspace modes:**
+- **Plain mode** (`mrw init`): Interactive init, services imported via `services.yaml`. Full service management (add/remove/update/import).
+- **Design-driven mode** (`mrw init --from-arch <repo-url>`): Initializes from a service architecture design repo. The arch repo is cloned to workspace root and its `services.yaml` is auto-imported. Service add/remove are blocked; services are updated via `mrw service import` only. The arch repo is a first-class repo managed by sync/status/branch/checkout/repo commands.
 
 ## Development Commands
 
@@ -63,10 +67,14 @@ src/
 Key types and functions:
 
 - `ServiceConfig` — `{ repo, branch, language?, description?, path? }`. The `path` field is optional and specifies the service subdirectory within a monorepo.
-- `WorkspaceConfig` — `{ version, workspace: { name, description?, domain? }, services: Record<string, ServiceConfig> }`
-- `deriveRepoName(repoUrl)` — extracts a directory name from a git URL (strips `.git`, trailing slashes, takes last path segment). Used to determine `.mrw/state/repos/<name>/`.
+- `ArchConfig` — `{ repo, branch }`. Optional field on `WorkspaceConfig` for design-driven workspaces.
+- `WorkspaceConfig` — `{ version, workspace: { name, description?, domain? }, services: Record<string, ServiceConfig>, arch?: ArchConfig }`
+- `deriveRepoName(repoUrl)` — extracts a directory name from a git URL (strips `.git`, trailing slashes, takes last path segment). Used to determine `repos/<name>/` and arch repo directory at workspace root.
 - `getRepoIndex(config)` — groups services by `repo` URL, returns a `RepoIndex` (Map of repo-dir-name → `{ url, branch, services[] }`). Handles name collisions by appending numeric suffixes.
-- `getServiceRepoDir(serviceName, config, cwd)` — resolves a service name to its repo directory path.
+- `getServiceRepoDir(serviceName, config, cwd)` — resolves a service name to its repo directory path under `repos/`.
+- `isDesignDriven(config)` — returns `true` when `config.arch` is set.
+- `archRepoDir(config, cwd)` — returns the arch repo directory path at workspace root.
+- `getReposDir(cwd)` — returns `<cwd>/repos/`.
 
 All commands that interact with cloned repos must use `getRepoIndex()` or `getServiceRepoDir()` rather than constructing paths from service names directly.
 
@@ -99,7 +107,7 @@ This is a **TypeScript-only project**. The following rules are enforced:
   - `commands/`: integration tests that verify CLI output and exit codes
   - Edge cases: missing workspace.yaml, invalid YAML, uncommitted changes detection, repo name collisions, branch conflicts in shared repos
 - **Mocking:** Use `vi.mock()` for external deps (`simple-git`, `inquirer`). For `fs`, mock at the module level or use temp directories via `os.tmpdir()`.
-- **Repo directory naming in tests:** Test repos under `.mrw/state/repos/` use repo-derived names (e.g., `order` for `https://example.com/order.git`), not service names.
+- **Repo directory naming in tests:** Test repos under `repos/` use repo-derived names (e.g., `order` for `https://example.com/order.git`), not service names.
 
 ## Dependency Management
 

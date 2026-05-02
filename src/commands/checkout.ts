@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import fs from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
-import { loadWorkspace, getRepoIndex } from '../lib/workspace.js';
+import { loadWorkspace, getRepoIndex, archRepoDir, isDesignDriven } from '../lib/workspace.js';
 
 export const checkoutCommand = new Command('checkout')
   .description('Switch branches across service repositories')
@@ -18,7 +18,7 @@ export const checkoutCommand = new Command('checkout')
       return;
     }
 
-    const reposDir = path.join(cwd, '.mrw', 'state', 'repos');
+    const reposDir = path.join(cwd, 'repos');
     const index = getRepoIndex(config);
     const targetServices = options.services
       ? options.services.split(',').map(s => s.trim())
@@ -26,6 +26,36 @@ export const checkoutCommand = new Command('checkout')
 
     const targetSet = new Set(targetServices);
     const processedRepos = new Set<string>();
+
+    // Handle arch repo first (when no --services filter)
+    if (isDesignDriven(config) && !options.services) {
+      const archPath = archRepoDir(config, cwd);
+      const archName = path.basename(archPath);
+
+      if (!fs.existsSync(archPath)) {
+        console.log(chalk.yellow(`${archName} [arch]: not cloned, skipping.`));
+      } else {
+        try {
+          const git = simpleGit(archPath);
+          const status = await git.status();
+
+          if (!status.isClean()) {
+            console.log(chalk.yellow(`${archName} [arch]: skipped (uncommitted changes)`));
+          } else {
+            await git.checkout(branchName);
+            console.log(chalk.green(`${archName} [arch]: switched to "${branchName}"`));
+          }
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (message.includes('did not match any file')) {
+            console.log(chalk.red(`${archName} [arch]: branch "${branchName}" not found`));
+          } else {
+            console.log(chalk.red(`${archName} [arch]: ${message}`));
+          }
+        }
+      }
+      processedRepos.add(archName);
+    }
 
     for (const name of targetServices) {
       if (!config.services[name]) {

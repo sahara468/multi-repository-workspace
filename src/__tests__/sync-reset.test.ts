@@ -123,8 +123,8 @@ describe('sync command --depth', () => {
   });
 
   it('does not pass depth to pull for existing repositories', async () => {
-    // Repo directories use repo-derived names (order, inventory) not service names
-    const reposDir = path.join(tmpDir, '.mrw', 'state', 'repos');
+    // Repo directories use repo-derived names (order, inventory) under repos/
+    const reposDir = path.join(tmpDir, 'repos');
     fs.mkdirSync(path.join(reposDir, 'order'), { recursive: true });
     fs.mkdirSync(path.join(reposDir, 'inventory'), { recursive: true });
 
@@ -208,6 +208,70 @@ describe('sync command with shared repos', () => {
   });
 });
 
+describe('sync command with arch repo', () => {
+  let tmpDir: string;
+  let originalCwd: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mrw-sync-arch-'));
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    vi.clearAllMocks();
+    vi.resetModules();
+    mockClone.mockResolvedValue('');
+    mockPull.mockResolvedValue('');
+    mockStatus.mockResolvedValue({ isClean: () => true });
+    mockBranch.mockResolvedValue({ current: 'main' });
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('pulls arch repo before service repos when arch config is present', async () => {
+    const config: WorkspaceConfig = {
+      version: 1,
+      workspace: { name: 'design-ws' },
+      services: {
+        'order-service': { repo: 'https://example.com/order.git', branch: 'main' },
+      },
+      arch: { repo: 'https://github.com/org/arch-design.git', branch: 'main' },
+    };
+    saveWorkspace(tmpDir, config);
+
+    // Create arch repo directory so it gets pulled instead of cloned
+    fs.mkdirSync(path.join(tmpDir, 'arch-design'), { recursive: true });
+
+    const { syncCommand } = await import('../commands/sync.js');
+    await syncCommand.parseAsync(['node', 'test']);
+
+    // Arch repo should be pulled (it exists)
+    expect(mockPull).toHaveBeenCalled();
+  });
+
+  it('includes arch repo in summary with [arch] label', async () => {
+    const config: WorkspaceConfig = {
+      version: 1,
+      workspace: { name: 'design-ws' },
+      services: {
+        'order-service': { repo: 'https://example.com/order.git', branch: 'main' },
+      },
+      arch: { repo: 'https://github.com/org/arch-design.git', branch: 'main' },
+    };
+    saveWorkspace(tmpDir, config);
+    fs.mkdirSync(path.join(tmpDir, 'arch-design'), { recursive: true });
+
+    const consoleSpy = vi.spyOn(console, 'log');
+    const { syncCommand } = await import('../commands/sync.js');
+    await syncCommand.parseAsync(['node', 'test']);
+
+    const allOutput = consoleSpy.mock.calls.flat().map(String).join(' ');
+    expect(allOutput).toContain('[arch]');
+    consoleSpy.mockRestore();
+  });
+});
+
 describe('reset command', () => {
   let tmpDir: string;
   let originalCwd: string;
@@ -230,8 +294,8 @@ describe('reset command', () => {
   });
 
   it('prompts for confirmation and proceeds when confirmed', async () => {
-    // Repo directories use repo-derived names
-    const reposDir = path.join(tmpDir, '.mrw', 'state', 'repos');
+    // Repo directories use repo-derived names under repos/
+    const reposDir = path.join(tmpDir, 'repos');
     fs.mkdirSync(path.join(reposDir, 'order'), { recursive: true });
 
     vi.mocked(inquirer.prompt).mockResolvedValue({ confirmed: true });
@@ -255,7 +319,7 @@ describe('reset command', () => {
   });
 
   it('skips confirmation prompt with --force flag', async () => {
-    const reposDir = path.join(tmpDir, '.mrw', 'state', 'repos');
+    const reposDir = path.join(tmpDir, 'repos');
     fs.mkdirSync(path.join(reposDir, 'order'), { recursive: true });
 
     const { resetCommand } = await import('../commands/reset.js');
@@ -266,7 +330,7 @@ describe('reset command', () => {
   });
 
   it('targets a single service with --service flag', async () => {
-    const reposDir = path.join(tmpDir, '.mrw', 'state', 'repos');
+    const reposDir = path.join(tmpDir, 'repos');
     fs.mkdirSync(path.join(reposDir, 'order'), { recursive: true });
     fs.mkdirSync(path.join(reposDir, 'inventory'), { recursive: true });
 
@@ -294,7 +358,7 @@ describe('reset command', () => {
   });
 
   it('shows summary output after reset', async () => {
-    const reposDir = path.join(tmpDir, '.mrw', 'state', 'repos');
+    const reposDir = path.join(tmpDir, 'repos');
     fs.mkdirSync(path.join(reposDir, 'order'), { recursive: true });
 
     const consoleSpy = vi.spyOn(console, 'log');
