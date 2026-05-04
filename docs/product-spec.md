@@ -153,8 +153,8 @@ MRW Workspace 层负责：              单仓库上下文负责：
 
 | 命令 | 功能 | 说明 |
 |------|------|------|
-| `mrw init` | 交互式创建 Workspace | 提示 workspace name/description/domain，循环添加 service |
-| `mrw init --from-template <name>` | 从模板创建 | 预置常用业务域模板 |
+| `mrw init` | 创建 Workspace | 支持 `--name`/`--description` 指定元数据，`[directory]` 指定目录 |
+| `mrw init --from-arch <repo-url>` | 从架构设计仓库创建 | 克隆架构仓库并导入 services.yaml |
 | `mrw sync` | 同步所有仓库 | clone 未 clone 的仓库，pull 已 clone 的仓库 |
 | `mrw sync <service>` | 同步单个仓库 | 只操作指定服务 |
 | `mrw status` | 查看 Workspace 状态 | 服务列表、分支、同步状态、未提交变更 |
