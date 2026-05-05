@@ -2,8 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import YAML from 'yaml';
-import { saveWorkspace, loadWorkspace, type WorkspaceConfig } from '../lib/workspace.js';
+import { loadWorkspace, type WorkspaceConfig } from '../lib/workspace.js';
 
 // Mock simple-git
 const mockClone = vi.fn();
@@ -48,7 +47,7 @@ describe('mrw init with directory argument', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('creates directory and workspace.yaml inside it', async () => {
+  it('creates directory and workspace.yaml inside it with explicit directory arg', async () => {
     const { initCommand } = await import('../commands/init.js');
     await initCommand.parseAsync(['node', 'test', 'my-workspace', '--name', 'my-project']);
 
@@ -59,6 +58,15 @@ describe('mrw init with directory argument', () => {
 
     const loaded = loadWorkspace(wsDir);
     expect(loaded?.workspace.name).toBe('my-project');
+  });
+
+  it('derives workspace name from directory basename when --name omitted', async () => {
+    const { initCommand } = await import('../commands/init.js');
+    await initCommand.parseAsync(['node', 'test', 'my-workspace']);
+
+    const wsDir = path.join(tmpDir, 'my-workspace');
+    const loaded = loadWorkspace(wsDir);
+    expect(loaded?.workspace.name).toBe('my-workspace');
   });
 
   it('works when directory exists but has no workspace', async () => {
@@ -81,7 +89,8 @@ describe('mrw init with directory argument', () => {
       workspace: { name: 'existing' },
       services: {},
     };
-    saveWorkspace(existingDir, config);
+    const yaml = require('yaml');
+    fs.writeFileSync(path.join(existingDir, 'workspace.yaml'), yaml.stringify(config));
 
     const consoleSpy = vi.spyOn(console, 'log');
     const { initCommand } = await import('../commands/init.js');
@@ -100,23 +109,14 @@ describe('mrw init with directory argument', () => {
     expect(fs.existsSync(wsDir)).toBe(true);
     expect(fs.existsSync(path.join(wsDir, 'workspace.yaml'))).toBe(true);
   });
-
-  it('inits in current directory when no directory argument', async () => {
-    const { initCommand } = await import('../commands/init.js');
-    await initCommand.parseAsync(['node', 'test', '--name', 'test-ws']);
-
-    expect(fs.existsSync(path.join(tmpDir, 'workspace.yaml'))).toBe(true);
-    const loaded = loadWorkspace(tmpDir);
-    expect(loaded?.workspace.name).toBe('test-ws');
-  });
 });
 
-describe('mrw init with CLI options', () => {
+describe('mrw init uses name as directory when no directory arg', () => {
   let tmpDir: string;
   let originalCwd: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mrw-init-cli-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mrw-init-namedir-'));
     originalCwd = process.cwd();
     process.chdir(tmpDir);
     vi.clearAllMocks();
@@ -128,11 +128,16 @@ describe('mrw init with CLI options', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('creates workspace with --name and --description without prompts', async () => {
+  it('creates directory named after workspace name when no directory arg', async () => {
     const { initCommand } = await import('../commands/init.js');
     await initCommand.parseAsync(['node', 'test', '--name', 'my-project', '--description', 'My project']);
 
-    const loaded = loadWorkspace(tmpDir);
+    const wsDir = path.join(tmpDir, 'my-project');
+    expect(fs.existsSync(wsDir)).toBe(true);
+    expect(fs.existsSync(path.join(wsDir, 'workspace.yaml'))).toBe(true);
+    expect(fs.existsSync(path.join(wsDir, 'repos'))).toBe(true);
+
+    const loaded = loadWorkspace(wsDir);
     expect(loaded?.workspace.name).toBe('my-project');
     expect(loaded?.workspace.description).toBe('My project');
     // No domain set
@@ -141,34 +146,57 @@ describe('mrw init with CLI options', () => {
     expect(mockPrompt).not.toHaveBeenCalled();
   });
 
-  it('creates workspace with --name only, prompts for description in TTY', async () => {
-    mockPrompt.mockResolvedValue({ description: 'Prompted description' });
+  it('creates directory from prompted name in interactive mode', async () => {
+    mockPrompt
+      .mockResolvedValueOnce({ name: 'prompted-name' })
+      .mockResolvedValueOnce({ description: 'Prompted desc' });
 
-    const { initCommand } = await import('../commands/init.js');
-    await initCommand.parseAsync(['node', 'test', '--name', 'my-project']);
-
-    const loaded = loadWorkspace(tmpDir);
-    expect(loaded?.workspace.name).toBe('my-project');
-    // Inquirer was called for description since isTTY is undefined in test (not true)
-  });
-
-  it('does not prompt for domain', async () => {
-    mockPrompt.mockResolvedValue({ name: 'test' });
-
-    // Simulate interactive by importing with process.stdin.isTTY
     const originalIsTTY = process.stdin.isTTY;
     Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
 
     const { initCommand } = await import('../commands/init.js');
     await initCommand.parseAsync(['node', 'test']);
 
-    // Verify inquirer was called and check prompt structure
-    expect(mockPrompt).toHaveBeenCalled();
-    const promptCalls = mockPrompt.mock.calls;
-    // The first prompt should be for name (since no --name provided)
-    const namePrompt = promptCalls[0][0] as Array<{ name: string; message: string }>;
-    const promptNames = namePrompt.map((p: { name: string }) => p.name);
-    expect(promptNames).not.toContain('domain');
+    const wsDir = path.join(tmpDir, 'prompted-name');
+    expect(fs.existsSync(wsDir)).toBe(true);
+    expect(fs.existsSync(path.join(wsDir, 'workspace.yaml'))).toBe(true);
+
+    const loaded = loadWorkspace(wsDir);
+    expect(loaded?.workspace.name).toBe('prompted-name');
+    expect(loaded?.workspace.description).toBe('Prompted desc');
+
+    Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+  });
+
+  it('creates directory from --name with --description without prompts', async () => {
+    const { initCommand } = await import('../commands/init.js');
+    await initCommand.parseAsync(['node', 'test', '--name', 'my-project', '--description', 'My project']);
+
+    const wsDir = path.join(tmpDir, 'my-project');
+    const loaded = loadWorkspace(wsDir);
+    expect(loaded?.workspace.name).toBe('my-project');
+    expect(loaded?.workspace.description).toBe('My project');
+    expect(loaded?.workspace.domain).toBeUndefined();
+    expect(mockPrompt).not.toHaveBeenCalled();
+  });
+
+  it('does not prompt for domain', async () => {
+    mockPrompt
+      .mockResolvedValueOnce({ name: 'test' })
+      .mockResolvedValueOnce({ description: 'desc' });
+
+    const originalIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+
+    const { initCommand } = await import('../commands/init.js');
+    await initCommand.parseAsync(['node', 'test']);
+
+    // Check all prompt calls - none should ask for 'domain'
+    const allPromptNames = mockPrompt.mock.calls.flat().flatMap((call: unknown) => {
+      if (Array.isArray(call)) return (call as Array<{ name: string }>).map((p) => p.name);
+      return [];
+    });
+    expect(allPromptNames).not.toContain('domain');
 
     Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
   });
@@ -184,7 +212,6 @@ describe('mrw init non-interactive mode', () => {
     originalCwd = process.cwd();
     originalIsTTY = process.stdin.isTTY;
     process.chdir(tmpDir);
-    // Simulate non-interactive (no TTY)
     Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
     vi.clearAllMocks();
     vi.resetModules();
@@ -203,8 +230,8 @@ describe('mrw init non-interactive mode', () => {
     try {
       const { initCommand } = await import('../commands/init.js');
       await initCommand.parseAsync(['node', 'test']);
-    } catch (err: unknown) {
-      // process.exit throws in test
+    } catch {
+      // Expected
     }
 
     expect(mockExit).toHaveBeenCalledWith(1);
@@ -214,11 +241,14 @@ describe('mrw init non-interactive mode', () => {
     mockExit.mockRestore();
   });
 
-  it('succeeds with --name in non-interactive mode', async () => {
+  it('succeeds with --name in non-interactive mode and creates directory', async () => {
     const { initCommand } = await import('../commands/init.js');
     await initCommand.parseAsync(['node', 'test', '--name', 'my-project']);
 
-    const loaded = loadWorkspace(tmpDir);
+    const wsDir = path.join(tmpDir, 'my-project');
+    expect(fs.existsSync(wsDir)).toBe(true);
+
+    const loaded = loadWorkspace(wsDir);
     expect(loaded?.workspace.name).toBe('my-project');
     expect(loaded?.workspace.description).toBeUndefined();
     expect(mockPrompt).not.toHaveBeenCalled();
@@ -248,19 +278,26 @@ describe('mrw init --from-arch name derivation', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('derives name from repo URL when --name is omitted', async () => {
+  it('derives name and creates directory from repo URL when --name and directory omitted', async () => {
     const { initCommand } = await import('../commands/init.js');
     await initCommand.parseAsync(['node', 'test', '--from-arch', 'https://github.com/org/my-arch.git']);
 
-    const loaded = loadWorkspace(tmpDir);
+    const wsDir = path.join(tmpDir, 'my-arch');
+    expect(fs.existsSync(wsDir)).toBe(true);
+    expect(fs.existsSync(path.join(wsDir, 'workspace.yaml'))).toBe(true);
+
+    const loaded = loadWorkspace(wsDir);
     expect(loaded?.workspace.name).toBe('my-arch');
   });
 
-  it('uses --name when provided with --from-arch', async () => {
+  it('uses --name as directory name when no directory arg', async () => {
     const { initCommand } = await import('../commands/init.js');
     await initCommand.parseAsync(['node', 'test', '--from-arch', 'https://github.com/org/my-arch.git', '--name', 'custom-name']);
 
-    const loaded = loadWorkspace(tmpDir);
+    const wsDir = path.join(tmpDir, 'custom-name');
+    expect(fs.existsSync(wsDir)).toBe(true);
+
+    const loaded = loadWorkspace(wsDir);
     expect(loaded?.workspace.name).toBe('custom-name');
   });
 
@@ -268,17 +305,22 @@ describe('mrw init --from-arch name derivation', () => {
     const { initCommand } = await import('../commands/init.js');
     await initCommand.parseAsync(['node', 'test', '--from-arch', 'https://github.com/org/my-arch.git', '--description', 'My desc']);
 
-    const loaded = loadWorkspace(tmpDir);
+    const wsDir = path.join(tmpDir, 'my-arch');
+    const loaded = loadWorkspace(wsDir);
     expect(loaded?.workspace.description).toBe('My desc');
   });
 
-  it('supports directory argument with --from-arch', async () => {
+  it('uses explicit directory arg with --from-arch', async () => {
     const { initCommand } = await import('../commands/init.js');
     await initCommand.parseAsync(['node', 'test', 'my-arch-dir', '--from-arch', 'https://github.com/org/my-arch.git']);
 
     const wsDir = path.join(tmpDir, 'my-arch-dir');
     expect(fs.existsSync(wsDir)).toBe(true);
     expect(fs.existsSync(path.join(wsDir, 'workspace.yaml'))).toBe(true);
+
+    const loaded = loadWorkspace(wsDir);
+    // Name derived from directory basename when --name not specified
+    expect(loaded?.workspace.name).toBe('my-arch-dir');
   });
 });
 
@@ -300,7 +342,6 @@ describe('mrw init --from-template removed', () => {
   });
 
   it('rejects --from-template as unknown option', async () => {
-    // Commander exits with error for unknown options — verify it doesn't succeed
     const mockExit = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
       throw new Error(`process.exit(${code})`);
     });
@@ -308,10 +349,8 @@ describe('mrw init --from-template removed', () => {
     try {
       const { initCommand } = await import('../commands/init.js');
       await initCommand.parseAsync(['node', 'test', '--from-template', 'microservice-java']);
-      // Should not reach here
       expect.unreachable('Should have exited');
     } catch {
-      // Expected: Commander calls process.exit(1) for unknown option
       expect(mockExit).toHaveBeenCalledWith(1);
     }
 
