@@ -8,14 +8,31 @@ import simpleGit from 'simple-git';
 import { saveWorkspace, loadServiceFile, importServices, deriveRepoName, type WorkspaceConfig } from '../lib/workspace.js';
 
 export const initCommand = new Command('init')
-  .description('Initialize a new MRW workspace in the current directory')
-  .option('--from-template <template>', 'Initialize from a template')
+  .description('Initialize a new MRW workspace')
+  .argument('[directory]', 'Directory to create and initialize the workspace in')
   .option('--from-arch <repo-url>', 'Initialize from a service architecture design repo')
   .option('--arch-branch <branch>', 'Branch for the arch repo (default: main)', 'main')
   .option('--services-file <path>', 'Import services from a YAML file (default: services.yaml)')
-  .action(async (options: { fromTemplate?: string; fromArch?: string; archBranch?: string; servicesFile?: string }) => {
-    const cwd = process.cwd();
+  .option('--name <string>', 'Workspace name')
+  .option('--description <string>', 'Workspace description')
+  .action(async (directory: string | undefined, options: {
+    fromArch?: string;
+    archBranch?: string;
+    servicesFile?: string;
+    name?: string;
+    description?: string;
+  }) => {
+    const baseCwd = process.cwd();
+    const cwd = directory
+      ? path.resolve(baseCwd, directory)
+      : baseCwd;
+
     const workspacePath = path.join(cwd, 'workspace.yaml');
+
+    // Create directory if it doesn't exist
+    if (directory && !fs.existsSync(cwd)) {
+      fs.mkdirSync(cwd, { recursive: true });
+    }
 
     if (fs.existsSync(workspacePath)) {
       console.log(chalk.yellow('Workspace already exists in this directory.'));
@@ -23,51 +40,69 @@ export const initCommand = new Command('init')
     }
 
     if (options.fromArch) {
-      await initFromArch(cwd, options.fromArch, options.archBranch ?? 'main');
+      await initFromArch(cwd, options.fromArch, options.archBranch ?? 'main', options);
       return;
     }
 
-    if (options.fromTemplate) {
-      await initFromTemplate(cwd, options.fromTemplate);
-      return;
-    }
-
-    await initInteractive(cwd, options.servicesFile);
+    await initInteractive(cwd, options);
   });
 
-async function initInteractive(cwd: string, servicesFile?: string): Promise<void> {
-  const answers = await inquirer.prompt([
-    {
-      type: 'input',
-      name: 'name',
-      message: 'Workspace name:',
-      validate: (v: string) => v.trim() ? true : 'Name is required',
-    },
-    {
-      type: 'input',
-      name: 'description',
-      message: 'Description:',
-    },
-    {
-      type: 'input',
-      name: 'domain',
-      message: 'Business domain:',
-    },
-  ]);
+async function initInteractive(cwd: string, options: {
+  name?: string;
+  description?: string;
+  servicesFile?: string;
+}): Promise<void> {
+  const isInteractive = process.stdin.isTTY ?? false;
+
+  let workspaceName = options.name;
+  let workspaceDescription = options.description;
+
+  if (!workspaceName) {
+    if (isInteractive) {
+      const answers = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'name',
+          message: 'Workspace name:',
+          validate: (v: string) => v.trim() ? true : 'Name is required',
+        },
+      ]);
+      workspaceName = answers.name;
+    } else {
+      console.log(chalk.red('Workspace name is required in non-interactive mode. Use --name <name>'));
+      process.exit(1);
+      return; // Unreachable, but satisfies type checker
+    }
+  }
+
+  if (!workspaceName) {
+    // Should never reach here, but satisfies type narrowing
+    return;
+  }
+
+  if (!workspaceDescription && isInteractive) {
+    const answers = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'description',
+        message: 'Description:',
+      },
+    ]);
+    workspaceDescription = answers.description || undefined;
+  }
 
   const config: WorkspaceConfig = {
     version: 1,
     workspace: {
-      name: answers.name,
-      description: answers.description || undefined,
-      domain: answers.domain || undefined,
+      name: workspaceName,
+      description: workspaceDescription,
     },
     services: {},
   };
 
   // Import services from file if available
-  const servicesFilePath = servicesFile
-    ? path.resolve(cwd, servicesFile)
+  const servicesFilePath = options.servicesFile
+    ? path.resolve(cwd, options.servicesFile)
     : path.join(cwd, 'services.yaml');
 
   if (fs.existsSync(servicesFilePath)) {
@@ -85,8 +120,8 @@ async function initInteractive(cwd: string, servicesFile?: string): Promise<void
       const message = err instanceof Error ? err.message : String(err);
       spinner.warn(chalk.yellow(`Failed to import services: ${message}`));
     }
-  } else if (servicesFile) {
-    console.log(chalk.yellow(`Services file "${servicesFile}" not found.`));
+  } else if (options.servicesFile) {
+    console.log(chalk.yellow(`Services file "${options.servicesFile}" not found.`));
   }
 
   const spinner = ora('Creating workspace...').start();
@@ -95,17 +130,7 @@ async function initInteractive(cwd: string, servicesFile?: string): Promise<void
   fs.mkdirSync(path.join(cwd, 'repos'), { recursive: true });
 
   // Create .gitignore
-  const gitignorePath = path.join(cwd, '.gitignore');
-  const gitignoreContent = fs.existsSync(gitignorePath)
-    ? fs.readFileSync(gitignorePath, 'utf-8')
-    : '';
-
-  if (!gitignoreContent.includes('.mrw/')) {
-    const updated = gitignoreContent
-      ? gitignoreContent.trimEnd() + '\n.mrw/\n'
-      : '.mrw/\n';
-    fs.writeFileSync(gitignorePath, updated);
-  }
+  createGitignore(cwd);
 
   // Write workspace.yaml
   saveWorkspace(cwd, config);
@@ -115,63 +140,10 @@ async function initInteractive(cwd: string, servicesFile?: string): Promise<void
   console.log(chalk.dim('  Run `mrw sync` to clone service repositories'));
 }
 
-async function initFromTemplate(cwd: string, templateName: string): Promise<void> {
-  const templates: Record<string, { workspace: WorkspaceConfig['workspace']; services: WorkspaceConfig['services'] }> = {
-    'microservice-java': {
-      workspace: { name: templateName, description: 'Java microservice workspace', domain: 'backend' },
-      services: {
-        'api-gateway': { repo: 'https://github.com/example/api-gateway.git', branch: 'main', language: 'java', description: 'API Gateway' },
-        'user-service': { repo: 'https://github.com/example/user-service.git', branch: 'main', language: 'java', description: 'User Service' },
-        'order-service': { repo: 'https://github.com/example/order-service.git', branch: 'main', language: 'java', description: 'Order Service' },
-      },
-    },
-    'microservice-go': {
-      workspace: { name: templateName, description: 'Go microservice workspace', domain: 'backend' },
-      services: {
-        'api-gateway': { repo: 'https://github.com/example/api-gateway.git', branch: 'main', language: 'go', description: 'API Gateway' },
-        'user-service': { repo: 'https://github.com/example/user-service.git', branch: 'main', language: 'go', description: 'User Service' },
-      },
-    },
-  };
-
-  const template = templates[templateName];
-  if (!template) {
-    console.log(chalk.red(`Template "${templateName}" not found. Available: ${Object.keys(templates).join(', ')}`));
-    return;
-  }
-
-  const config: WorkspaceConfig = {
-    version: 1,
-    workspace: template.workspace,
-    services: template.services,
-  };
-
-  const spinner = ora(`Creating workspace from template "${templateName}"...`).start();
-
-  // Create directory structure
-  fs.mkdirSync(path.join(cwd, 'repos'), { recursive: true });
-
-  // Create .gitignore
-  const gitignorePath = path.join(cwd, '.gitignore');
-  const gitignoreContent = fs.existsSync(gitignorePath)
-    ? fs.readFileSync(gitignorePath, 'utf-8')
-    : '';
-
-  if (!gitignoreContent.includes('.mrw/')) {
-    const updated = gitignoreContent
-      ? gitignoreContent.trimEnd() + '\n.mrw/\n'
-      : '.mrw/\n';
-    fs.writeFileSync(gitignorePath, updated);
-  }
-
-  saveWorkspace(cwd, config);
-
-  spinner.succeed(chalk.green(`Workspace initialized from template "${templateName}"!`));
-  console.log(chalk.dim(`  Created workspace.yaml with ${Object.keys(config.services).length} service(s)`));
-  console.log(chalk.dim('  Run `mrw sync` to clone service repositories'));
-}
-
-async function initFromArch(cwd: string, repoUrl: string, branch: string): Promise<void> {
+async function initFromArch(cwd: string, repoUrl: string, branch: string, options: {
+  name?: string;
+  description?: string;
+}): Promise<void> {
   const archRepoName = deriveRepoName(repoUrl);
   const archRepoPath = path.join(cwd, archRepoName);
 
@@ -204,10 +176,16 @@ async function initFromArch(cwd: string, repoUrl: string, branch: string): Promi
     console.log(chalk.yellow(`Warning: arch repo is missing "arch/" directory (convention)`));
   }
 
+  // Workspace name: --name takes precedence, otherwise derive from repo URL
+  const workspaceName = options.name ?? archRepoName;
+
   // Import services from arch repo's services.yaml
   const config: WorkspaceConfig = {
     version: 1,
-    workspace: { name: archRepoName },
+    workspace: {
+      name: workspaceName,
+      description: options.description,
+    },
     services: {},
     arch: { repo: repoUrl, branch },
   };
@@ -231,6 +209,18 @@ async function initFromArch(cwd: string, repoUrl: string, branch: string): Promi
   fs.mkdirSync(path.join(cwd, 'repos'), { recursive: true });
 
   // Create .gitignore
+  createGitignore(cwd);
+
+  // Write workspace.yaml
+  saveWorkspace(cwd, config);
+
+  console.log(chalk.green('Design-driven workspace initialized!'));
+  console.log(chalk.dim(`  Arch repo: ${archRepoName}/`));
+  console.log(chalk.dim(`  Services: ${Object.keys(config.services).length}`));
+  console.log(chalk.dim('  Run `mrw sync` to clone service repositories'));
+}
+
+function createGitignore(cwd: string): void {
   const gitignorePath = path.join(cwd, '.gitignore');
   const gitignoreContent = fs.existsSync(gitignorePath)
     ? fs.readFileSync(gitignorePath, 'utf-8')
@@ -242,12 +232,4 @@ async function initFromArch(cwd: string, repoUrl: string, branch: string): Promi
       : '.mrw/\n';
     fs.writeFileSync(gitignorePath, updated);
   }
-
-  // Write workspace.yaml
-  saveWorkspace(cwd, config);
-
-  console.log(chalk.green('Design-driven workspace initialized!'));
-  console.log(chalk.dim(`  Arch repo: ${archRepoName}/`));
-  console.log(chalk.dim(`  Services: ${Object.keys(config.services).length}`));
-  console.log(chalk.dim('  Run `mrw sync` to clone service repositories'));
 }
