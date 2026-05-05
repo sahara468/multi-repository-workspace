@@ -80,8 +80,9 @@ describe('mrw init --from-arch', () => {
     const { initCommand } = await import('../commands/init.js');
     await initCommand.parseAsync(['node', 'test', '--from-arch', 'https://github.com/org/order-service-arch.git']);
 
-    // workspace.yaml should exist
-    const loaded = loadWorkspace(tmpDir);
+    // workspace.yaml should exist in the derived directory
+    const wsDir = path.join(tmpDir, 'order-service-arch');
+    const loaded = loadWorkspace(wsDir);
     expect(loaded).not.toBeNull();
     expect(loaded!.arch).toBeDefined();
     expect(loaded!.arch!.repo).toBe('https://github.com/org/order-service-arch.git');
@@ -91,10 +92,10 @@ describe('mrw init --from-arch', () => {
     expect(loaded!.services['user-service']).toBeDefined();
 
     // repos/ directory should be created
-    expect(fs.existsSync(path.join(tmpDir, 'repos'))).toBe(true);
+    expect(fs.existsSync(path.join(wsDir, 'repos'))).toBe(true);
 
     // .gitignore should have .mrw/
-    const gitignore = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf-8');
+    const gitignore = fs.readFileSync(path.join(wsDir, '.gitignore'), 'utf-8');
     expect(gitignore).toContain('.mrw/');
   });
 
@@ -111,7 +112,8 @@ describe('mrw init --from-arch', () => {
     const { initCommand } = await import('../commands/init.js');
     await initCommand.parseAsync(['node', 'test', '--from-arch', 'https://github.com/org/arch.git', '--arch-branch', 'develop']);
 
-    const loaded = loadWorkspace(tmpDir);
+    const wsDir = path.join(tmpDir, 'arch');
+    const loaded = loadWorkspace(wsDir);
     expect(loaded!.arch!.branch).toBe('develop');
   });
 
@@ -129,10 +131,11 @@ describe('mrw init --from-arch', () => {
     expect(allOutput).toContain('services.yaml');
     consoleSpy.mockRestore();
 
-    // Arch repo should be cleaned up
-    expect(fs.existsSync(path.join(tmpDir, 'bad-arch'))).toBe(false);
+    // Arch repo should be cleaned up inside the workspace dir
+    const wsDir = path.join(tmpDir, 'bad-arch');
+    expect(fs.existsSync(path.join(wsDir, 'bad-arch'))).toBe(false);
     // workspace.yaml should NOT exist
-    expect(fs.existsSync(path.join(tmpDir, 'workspace.yaml'))).toBe(false);
+    expect(fs.existsSync(path.join(wsDir, 'workspace.yaml'))).toBe(false);
   });
 
   it('warns when arch repo is missing specs/ or arch/ directories', async () => {
@@ -152,7 +155,8 @@ describe('mrw init --from-arch', () => {
     consoleSpy.mockRestore();
 
     // workspace.yaml should still be created
-    const loaded = loadWorkspace(tmpDir);
+    const wsDir = path.join(tmpDir, 'minimal-arch');
+    const loaded = loadWorkspace(wsDir);
     expect(loaded).not.toBeNull();
   });
 
@@ -172,7 +176,8 @@ describe('mrw init --from-arch', () => {
     await initCommand.parseAsync(['node', 'test', '--from-arch', 'https://github.com/org/arch.git']);
 
     // repos/ should exist but be empty (no service repos cloned)
-    const reposDir = path.join(tmpDir, 'repos');
+    const wsDir = path.join(tmpDir, 'arch');
+    const reposDir = path.join(wsDir, 'repos');
     expect(fs.existsSync(reposDir)).toBe(true);
     const entries = fs.readdirSync(reposDir);
     expect(entries).toHaveLength(0);

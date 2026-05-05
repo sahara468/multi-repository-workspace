@@ -9,11 +9,11 @@ import { saveWorkspace, loadServiceFile, importServices, deriveRepoName, type Wo
 
 export const initCommand = new Command('init')
   .description('Initialize a new MRW workspace')
-  .argument('[directory]', 'Directory to create and initialize the workspace in')
+  .argument('[directory]', 'Directory to create and initialize the workspace in (defaults to workspace name)')
   .option('--from-arch <repo-url>', 'Initialize from a service architecture design repo')
   .option('--arch-branch <branch>', 'Branch for the arch repo (default: main)', 'main')
   .option('--services-file <path>', 'Import services from a YAML file (default: services.yaml)')
-  .option('--name <string>', 'Workspace name')
+  .option('--name <string>', 'Workspace name (defaults to directory name)')
   .option('--description <string>', 'Workspace description')
   .action(async (directory: string | undefined, options: {
     fromArch?: string;
@@ -22,32 +22,15 @@ export const initCommand = new Command('init')
     name?: string;
     description?: string;
   }) => {
-    const baseCwd = process.cwd();
-    const cwd = directory
-      ? path.resolve(baseCwd, directory)
-      : baseCwd;
-
-    const workspacePath = path.join(cwd, 'workspace.yaml');
-
-    // Create directory if it doesn't exist
-    if (directory && !fs.existsSync(cwd)) {
-      fs.mkdirSync(cwd, { recursive: true });
-    }
-
-    if (fs.existsSync(workspacePath)) {
-      console.log(chalk.yellow('Workspace already exists in this directory.'));
-      return;
-    }
-
     if (options.fromArch) {
-      await initFromArch(cwd, options.fromArch, options.archBranch ?? 'main', options);
+      await initFromArch(directory, options.fromArch, options.archBranch ?? 'main', options);
       return;
     }
 
-    await initInteractive(cwd, options);
+    await initPlain(directory, options);
   });
 
-async function initInteractive(cwd: string, options: {
+async function initPlain(directory: string | undefined, options: {
   name?: string;
   description?: string;
   servicesFile?: string;
@@ -56,6 +39,11 @@ async function initInteractive(cwd: string, options: {
 
   let workspaceName = options.name;
   let workspaceDescription = options.description;
+
+  // Determine workspace name: --name > directory arg > prompt
+  if (!workspaceName && directory) {
+    workspaceName = path.basename(path.resolve(directory));
+  }
 
   if (!workspaceName) {
     if (isInteractive) {
@@ -71,12 +59,11 @@ async function initInteractive(cwd: string, options: {
     } else {
       console.log(chalk.red('Workspace name is required in non-interactive mode. Use --name <name>'));
       process.exit(1);
-      return; // Unreachable, but satisfies type checker
+      return;
     }
   }
 
   if (!workspaceName) {
-    // Should never reach here, but satisfies type narrowing
     return;
   }
 
@@ -89,6 +76,24 @@ async function initInteractive(cwd: string, options: {
       },
     ]);
     workspaceDescription = answers.description || undefined;
+  }
+
+  // Directory: explicit arg > name-based
+  const baseCwd = process.cwd();
+  const cwd = directory
+    ? path.resolve(baseCwd, directory)
+    : path.join(baseCwd, workspaceName);
+
+  const workspacePath = path.join(cwd, 'workspace.yaml');
+
+  if (fs.existsSync(workspacePath)) {
+    console.log(chalk.yellow(`Workspace already exists in ${cwd}.`));
+    return;
+  }
+
+  // Create directory
+  if (!fs.existsSync(cwd)) {
+    fs.mkdirSync(cwd, { recursive: true });
   }
 
   const config: WorkspaceConfig = {
@@ -136,15 +141,38 @@ async function initInteractive(cwd: string, options: {
   saveWorkspace(cwd, config);
 
   spinner.succeed(chalk.green('Workspace initialized!'));
-  console.log(chalk.dim(`  Created workspace.yaml with ${Object.keys(config.services).length} service(s)`));
-  console.log(chalk.dim('  Run `mrw sync` to clone service repositories'));
+  console.log(chalk.dim(`  Created ${cwd}`));
+  const cdPath = path.relative(baseCwd, cwd) || '.';
+  console.log(chalk.dim(`  Run "cd ${cdPath} && mrw sync" to clone service repositories`));
 }
 
-async function initFromArch(cwd: string, repoUrl: string, branch: string, options: {
+async function initFromArch(directory: string | undefined, repoUrl: string, branch: string, options: {
   name?: string;
   description?: string;
 }): Promise<void> {
   const archRepoName = deriveRepoName(repoUrl);
+
+  // Workspace name: --name > directory basename > derived from repo URL
+  const workspaceName = options.name ?? (directory ? path.basename(path.resolve(directory)) : archRepoName);
+
+  // Directory: explicit arg > name-based
+  const baseCwd = process.cwd();
+  const cwd = directory
+    ? path.resolve(baseCwd, directory)
+    : path.join(baseCwd, workspaceName);
+
+  const workspacePath = path.join(cwd, 'workspace.yaml');
+
+  if (fs.existsSync(workspacePath)) {
+    console.log(chalk.yellow(`Workspace already exists in ${cwd}.`));
+    return;
+  }
+
+  // Create directory
+  if (!fs.existsSync(cwd)) {
+    fs.mkdirSync(cwd, { recursive: true });
+  }
+
   const archRepoPath = path.join(cwd, archRepoName);
 
   // Clone the arch repo
@@ -175,9 +203,6 @@ async function initFromArch(cwd: string, repoUrl: string, branch: string, option
   if (!fs.existsSync(archDir)) {
     console.log(chalk.yellow(`Warning: arch repo is missing "arch/" directory (convention)`));
   }
-
-  // Workspace name: --name takes precedence, otherwise derive from repo URL
-  const workspaceName = options.name ?? archRepoName;
 
   // Import services from arch repo's services.yaml
   const config: WorkspaceConfig = {
@@ -215,9 +240,11 @@ async function initFromArch(cwd: string, repoUrl: string, branch: string, option
   saveWorkspace(cwd, config);
 
   console.log(chalk.green('Design-driven workspace initialized!'));
+  console.log(chalk.dim(`  Created ${cwd}`));
   console.log(chalk.dim(`  Arch repo: ${archRepoName}/`));
   console.log(chalk.dim(`  Services: ${Object.keys(config.services).length}`));
-  console.log(chalk.dim('  Run `mrw sync` to clone service repositories'));
+  const cdPath = path.relative(baseCwd, cwd) || '.';
+  console.log(chalk.dim(`  Run "cd ${cdPath} && mrw sync" to clone service repositories`));
 }
 
 function createGitignore(cwd: string): void {
